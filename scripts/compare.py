@@ -57,27 +57,65 @@ def download_wikitext2() -> tuple[str, str, str]:
     import zipfile
     import tempfile
     import os
+    import ssl
 
-    url = "https://s3.amazonaws.com/research.metamind.io/wikitext/wikitext-2-v1.zip"
+    # Try multiple URLs (the original URL moved)
+    urls = [
+        "https://raw.githubusercontent.com/pytorch/examples/main/word_language_model/data/wikitext-2/train.txt",
+    ]
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        zip_path = os.path.join(tmpdir, "wikitext-2-v1.zip")
-        print("Downloading WikiText-2...")
-        urllib.request.urlretrieve(url, zip_path)
+    # Use Hugging Face datasets as primary source (most reliable)
+    try:
+        print("Downloading WikiText-2 from Hugging Face...")
+        from huggingface_hub import hf_hub_download
 
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            zip_ref.extractall(tmpdir)
+        train_path = hf_hub_download(
+            repo_id="Salesforce/wikitext", filename="wikitext-2-raw-v1/train.parquet", repo_type="dataset"
+        )
+        val_path = hf_hub_download(
+            repo_id="Salesforce/wikitext", filename="wikitext-2-raw-v1/validation.parquet", repo_type="dataset"
+        )
+        test_path = hf_hub_download(
+            repo_id="Salesforce/wikitext", filename="wikitext-2-raw-v1/test.parquet", repo_type="dataset"
+        )
 
-        base = os.path.join(tmpdir, "wikitext-2")
+        import pandas as pd
+        train_text = "\n".join(pd.read_parquet(train_path)["text"].tolist())
+        val_text = "\n".join(pd.read_parquet(val_path)["text"].tolist())
+        test_text = "\n".join(pd.read_parquet(test_path)["text"].tolist())
 
-        with open(os.path.join(base, "wiki.train.tokens"), "r", encoding="utf-8") as f:
-            train_text = f.read()
-        with open(os.path.join(base, "wiki.valid.tokens"), "r", encoding="utf-8") as f:
-            val_text = f.read()
-        with open(os.path.join(base, "wiki.test.tokens"), "r", encoding="utf-8") as f:
-            test_text = f.read()
+        return train_text, val_text, test_text
 
-    return train_text, val_text, test_text
+    except ImportError:
+        print("huggingface_hub not available, trying alternative source...")
+
+    # Fallback: Try raw GitHub (PyTorch examples)
+    try:
+        print("Downloading WikiText-2 from PyTorch examples...")
+        base_url = "https://raw.githubusercontent.com/pytorch/examples/main/word_language_model/data/wikitext-2"
+
+        # Create SSL context that doesn't verify (for Colab compatibility)
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+
+        def fetch(url: str) -> str:
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, context=ctx) as response:
+                return response.read().decode('utf-8')
+
+        train_text = fetch(f"{base_url}/train.txt")
+        val_text = fetch(f"{base_url}/valid.txt")
+        test_text = fetch(f"{base_url}/test.txt")
+
+        return train_text, val_text, test_text
+
+    except Exception as e:
+        print(f"Failed to download: {e}")
+        raise RuntimeError(
+            "Could not download WikiText-2. Please install huggingface_hub:\n"
+            "  pip install huggingface_hub pandas pyarrow"
+        )
 
 
 def build_vocab(text: str, max_vocab: int) -> tuple[dict[str, int], dict[int, str]]:

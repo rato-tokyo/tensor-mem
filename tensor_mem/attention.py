@@ -6,7 +6,6 @@ import torch
 import torch.nn as nn
 
 from .memory import TensorMemory
-from .utils import elu_plus_one, repeat_kv
 
 
 class LinearMemoryAttention(nn.Module):
@@ -14,20 +13,23 @@ class LinearMemoryAttention(nn.Module):
     Linear Attention with Tensor Product Memory.
 
     This module implements a HuggingFace-compatible attention layer that uses
-    linear attention instead of softmax attention, combined with tensor product
-    memory for infinite context handling.
+    ONLY tensor product memory for attention computation. Unlike the original
+    Infini-attention which combines local attention with memory, this design
+    uses pure memory-based retrieval for simplicity and true O(n) complexity.
+
+    Design principle: NO local attention, only memory retrieval.
 
     Features:
-        - Linear O(n) complexity instead of O(n²)
+        - Linear O(n) complexity (no quadratic local attention)
         - GQA (Grouped Query Attention) support
-        - No position encoding (NoPE) for memory - content-based retrieval
+        - No position encoding (NoPE) - content-based retrieval
         - HuggingFace compatible interface
 
     The attention mechanism:
         1. Projects input to Q, K, V
         2. Applies ELU+1 activation to Q and K
-        3. Computes linear attention: output = σ(Q) @ (σ(K)^T @ V) / (σ(Q) @ Σσ(K))
-        4. Updates the persistent memory for future retrievals
+        3. RETRIEVES from memory using σ(Q) → this becomes the output
+        4. UPDATES memory with σ(K) and V for future retrievals
 
     Args:
         hidden_size: Hidden dimension of the model.
@@ -87,7 +89,7 @@ class LinearMemoryAttention(nn.Module):
         self.v_proj = nn.Linear(hidden_size, self.kv_proj_dim, bias=bias)
         self.o_proj = nn.Linear(self.q_proj_dim, hidden_size, bias=output_bias)
 
-        # Create memory for each head
+        # Create memory for each KV head
         # Memory dimension is head_dim (per-head memory)
         self.memories = nn.ModuleList(
             [
@@ -95,9 +97,6 @@ class LinearMemoryAttention(nn.Module):
                 for _ in range(self.num_key_value_heads)
             ]
         )
-
-        # Normalization buffers for each KV head
-        self.register_buffer("z_buffers", None, persistent=False)
 
     def reset_memory(
         self,
@@ -164,14 +163,18 @@ class LinearMemoryAttention(nn.Module):
         """
         Forward pass.
 
+        Processing order (important for causality):
+            1. Retrieve from memory (using past state)
+            2. Update memory (add current KV)
+
         Args:
             hidden_states: Input tensor [batch, seq, hidden_size].
-            attention_mask: (Unused) For API compatibility.
-            position_ids: (Unused) For API compatibility. NoPE design.
-            past_key_value: (Unused) For API compatibility. Memory replaces cache.
-            output_attentions: (Unused) Linear attention doesn't compute weights.
-            use_cache: (Unused) For API compatibility.
-            **kwargs: Additional arguments for compatibility.
+            _attention_mask: (Unused) For API compatibility.
+            _position_ids: (Unused) For API compatibility. NoPE design.
+            _past_key_value: (Unused) For API compatibility. Memory replaces cache.
+            _output_attentions: (Unused) Linear attention doesn't compute weights.
+            _use_cache: (Unused) For API compatibility.
+            **_kwargs: Additional arguments for compatibility.
 
         Returns:
             Tuple of:
@@ -192,57 +195,42 @@ class LinearMemoryAttention(nn.Module):
         key_states = self.k_proj(hidden_states)  # [batch, seq, kv_proj_dim]
         value_states = self.v_proj(hidden_states)  # [batch, seq, kv_proj_dim]
 
-        # Expand KV for GQA
-        if self.num_key_value_groups > 1:
-            key_states = repeat_kv(key_states, self.num_key_value_groups, self.head_dim)
-            value_states = repeat_kv(value_states, self.num_key_value_groups, self.head_dim)
+        # Split KV into heads (before GQA expansion)
+        # [batch, num_kv_heads, seq, head_dim]
+        kv_key_states = self._split_heads(key_states, self.num_key_value_heads)
+        kv_value_states = self._split_heads(value_states, self.num_key_value_heads)
 
-        # Split into heads
-        # [batch, num_heads, seq, head_dim]
+        # Split Q into heads
+        # [batch, num_q_heads, seq, head_dim]
         query_states = self._split_heads(query_states, self.num_attention_heads)
-        key_states = self._split_heads(key_states, self.num_attention_heads)
-        value_states = self._split_heads(value_states, self.num_attention_heads)
 
-        # Apply activation function: σ(Q) and σ(K)
-        sigma_q = elu_plus_one(query_states)  # [batch, num_heads, seq, head_dim]
-        sigma_k = elu_plus_one(key_states)  # [batch, num_heads, seq, head_dim]
-
-        # Compute linear attention for each head
-        # Linear attention: output = σ(Q) @ (σ(K)^T @ V) / (σ(Q) @ Σσ(K))
-
-        # σ(K)^T @ V: accumulates outer products
-        # [batch, num_heads, head_dim, seq] @ [batch, num_heads, seq, head_dim]
-        # -> [batch, num_heads, head_dim, head_dim]
-        kv_product = torch.einsum("bhsd,bhse->bhde", sigma_k, value_states)
-
-        # σ(Q) @ (σ(K)^T @ V)
-        # [batch, num_heads, seq, head_dim] @ [batch, num_heads, head_dim, head_dim]
-        # -> [batch, num_heads, seq, head_dim]
-        qkv = torch.einsum("bhsd,bhde->bhse", sigma_q, kv_product)
-
-        # Compute normalization: Σσ(K) for each head
-        # [batch, num_heads, seq, head_dim] -> [batch, num_heads, head_dim]
-        k_sum = sigma_k.sum(dim=2)
-
-        # σ(Q) @ Σσ(K) for normalization
-        # Need cumulative sum for causal attention
-        # For simplicity, we use the total sum (non-causal linear attention)
-        # [batch, num_heads, seq, head_dim] @ [batch, num_heads, head_dim]
-        # -> [batch, num_heads, seq]
-        norm = torch.einsum("bhsd,bhd->bhs", sigma_q, k_sum)
-
-        # Normalize with eps
-        attn_output = qkv / (norm.unsqueeze(-1) + self.eps)
-
-        # Update memories (per KV head group)
-        # We update with the original KV heads (before GQA expansion)
-        kv_key_states = self.k_proj(hidden_states)
-        kv_value_states = self.v_proj(hidden_states)
-        kv_key_states = self._split_heads(kv_key_states, self.num_key_value_heads)
-        kv_value_states = self._split_heads(kv_value_states, self.num_key_value_heads)
+        # Step 1: RETRIEVE from memory for each KV head
+        # Collect retrieved values per KV head, then expand for GQA
+        retrieved_per_kv_head = []
 
         for h, memory in enumerate(self.memories):
-            # Extract this head's keys and values
+            # Get queries for this KV head group
+            # For GQA, multiple Q heads share one KV head
+            # We use the first Q head in the group for retrieval
+            q_head_start = h * self.num_key_value_groups
+            head_queries = query_states[:, q_head_start, :, :]  # [batch, seq, head_dim]
+
+            # Retrieve from memory
+            retrieved = memory.retrieve(head_queries)  # [batch, seq, head_dim]
+            retrieved_per_kv_head.append(retrieved)
+
+        # Stack retrieved values: [batch, num_kv_heads, seq, head_dim]
+        retrieved_kv = torch.stack(retrieved_per_kv_head, dim=1)
+
+        # Expand for GQA: repeat each KV head for its query head group
+        if self.num_key_value_groups > 1:
+            # [batch, num_kv_heads, seq, head_dim] -> [batch, num_q_heads, seq, head_dim]
+            retrieved_kv = retrieved_kv.repeat_interleave(self.num_key_value_groups, dim=1)
+
+        attn_output = retrieved_kv  # [batch, num_q_heads, seq, head_dim]
+
+        # Step 2: UPDATE memory with current KV
+        for h, memory in enumerate(self.memories):
             # [batch, seq, head_dim]
             head_keys = kv_key_states[:, h, :, :]
             head_values = kv_value_states[:, h, :, :]

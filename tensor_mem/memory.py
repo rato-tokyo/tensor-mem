@@ -10,17 +10,14 @@ from .utils import elu_plus_one
 
 class TensorMemory(nn.Module):
     """
-    Tensor Product Memory (batch-shared).
+    Tensor Product Memory (single memory unit).
 
-    This class implements the core memory mechanism from Infini-attention,
-    using associative matrices for key-value storage.
-
-    The memory is shared across all batches (single M and z for all samples),
-    which enables learning global patterns across the dataset.
+    A simple associative memory that stores key-value bindings using
+    outer products. This is the fundamental building block.
 
     Memory structure:
-        M: [memory_dim, memory_dim] - Associative matrix storing KV bindings
-        z: [memory_dim] - Normalization term (cumulative sum of keys)
+        M: [dim, dim] - Associative matrix storing KV bindings
+        z: [dim] - Normalization term (cumulative sum of keys)
 
     Mathematical formulation:
         Update: M = M + σ(K)^T @ V / (batch * seq)
@@ -29,43 +26,41 @@ class TensorMemory(nn.Module):
 
     Where σ = ELU + 1 activation function.
 
-    Attributes:
-        memory_dim: Dimension of the memory (typically hidden_size).
+    For multi-head attention, create multiple TensorMemory instances.
+
+    Args:
+        dim: Dimension of the memory vectors.
         eps: Small constant for numerical stability.
-        M: Memory matrix buffer of shape [memory_dim, memory_dim].
-        z: Normalization vector buffer of shape [memory_dim].
 
     Example:
-        >>> memory = TensorMemory(memory_dim=768, eps=1e-6)
+        >>> memory = TensorMemory(dim=64)
         >>> memory.reset(device="cuda", dtype=torch.float16)
         >>>
-        >>> keys = torch.randn(4, 128, 768, device="cuda", dtype=torch.float16)
-        >>> values = torch.randn(4, 128, 768, device="cuda", dtype=torch.float16)
+        >>> keys = torch.randn(4, 128, 64, device="cuda", dtype=torch.float16)
+        >>> values = torch.randn(4, 128, 64, device="cuda", dtype=torch.float16)
         >>> memory.update(keys, values)
         >>>
-        >>> queries = torch.randn(4, 32, 768, device="cuda", dtype=torch.float16)
-        >>> output = memory.retrieve(queries)  # [4, 32, 768]
+        >>> queries = torch.randn(4, 32, 64, device="cuda", dtype=torch.float16)
+        >>> output = memory.retrieve(queries)  # [4, 32, 64]
     """
 
     def __init__(
         self,
-        memory_dim: int,
+        dim: int,
         eps: float = 1e-6,
     ) -> None:
-        """
-        Initialize TensorMemory.
-
-        Args:
-            memory_dim: Dimension of the memory vectors (typically hidden_size).
-            eps: Small constant for numerical stability in normalization.
-        """
+        """Initialize TensorMemory."""
         super().__init__()
-        self._memory_dim = memory_dim
+        self._dim = dim
         self.eps = eps
 
-        # Register buffers (persistent but not parameters)
         self.register_buffer("M", None, persistent=False)
         self.register_buffer("z", None, persistent=False)
+
+    @property
+    def dim(self) -> int:
+        """Return the memory dimension."""
+        return self._dim
 
     @property
     def is_initialized(self) -> bool:
@@ -79,33 +74,25 @@ class TensorMemory(nn.Module):
             return True
         return bool(torch.all(self.z == 0).item())
 
-    @property
-    def memory_dim(self) -> int:
-        """Return the memory dimension."""
-        return self._memory_dim
-
     def reset(
         self,
-        device: torch.device | None = None,
+        device: torch.device | str | None = None,
         dtype: torch.dtype | None = None,
     ) -> None:
         """
         Reset memory to zeros.
 
-        This should be called at the start of processing a new sequence
-        or when you want to clear accumulated memory.
-
         Args:
-            device: Device to place tensors on. If None, uses current device.
-            dtype: Data type for tensors. If None, uses torch.float32.
+            device: Device to place tensors on.
+            dtype: Data type for tensors.
         """
         if device is None:
             device = torch.device("cpu")
         if dtype is None:
             dtype = torch.float32
 
-        self.M = torch.zeros(self._memory_dim, self._memory_dim, device=device, dtype=dtype)
-        self.z = torch.zeros(self._memory_dim, device=device, dtype=dtype)
+        self.M = torch.zeros(self._dim, self._dim, device=device, dtype=dtype)
+        self.z = torch.zeros(self._dim, device=device, dtype=dtype)
 
     def update(
         self,
@@ -115,37 +102,23 @@ class TensorMemory(nn.Module):
         """
         Update memory with new key-value pairs.
 
-        This performs the memory update step from Infini-attention:
-            M = M + σ(K)^T @ V / (batch * seq)
-            z = z + Σσ(K) / batch
-
-        The normalization by batch size and sequence length ensures
-        stable updates regardless of input size.
-
         Args:
-            keys: Key tensor of shape [batch, seq, memory_dim].
-            values: Value tensor of shape [batch, seq, memory_dim].
-
-        Raises:
-            RuntimeError: If memory has not been initialized with reset().
+            keys: Key tensor of shape [batch, seq, dim].
+            values: Value tensor of shape [batch, seq, dim].
         """
         if not self.is_initialized:
-            raise RuntimeError("Memory not initialized. Call reset(device, dtype) first.")
+            raise RuntimeError("Memory not initialized. Call reset() first.")
 
         batch, seq, _ = keys.shape
 
-        # Apply activation function: σ(K) = ELU(K) + 1
-        sigma_k = elu_plus_one(keys)  # [batch, seq, memory_dim]
+        sigma_k = elu_plus_one(keys)
 
-        # Update memory matrix: M = M + σ(K)^T @ V / (batch * seq)
-        # σ(K)^T @ V: [memory_dim, seq] @ [seq, memory_dim] -> [memory_dim, memory_dim]
-        # We sum over batch dimension
+        # M = M + σ(K)^T @ V / (batch * seq)
         delta_m = torch.einsum("bsd,bse->de", sigma_k, values)
         self.M = self.M + delta_m / (batch * seq)
 
-        # Update normalization: z = z + Σσ(K) / batch
-        # Sum over batch and seq dimensions
-        delta_z = sigma_k.sum(dim=(0, 1))  # [memory_dim]
+        # z = z + Σσ(K) / batch
+        delta_z = sigma_k.sum(dim=(0, 1))
         self.z = self.z + delta_z / batch
 
     def retrieve(
@@ -155,38 +128,122 @@ class TensorMemory(nn.Module):
         """
         Retrieve from memory based on queries.
 
-        This performs the memory retrieval step from Infini-attention:
-            output = (σ(Q) @ M) / (σ(Q) @ z + eps)
-
         Args:
-            queries: Query tensor of shape [batch, seq, memory_dim].
+            queries: Query tensor of shape [batch, seq, dim].
 
         Returns:
-            Retrieved values of shape [batch, seq, memory_dim].
-
-        Raises:
-            RuntimeError: If memory has not been initialized with reset().
+            Retrieved values of shape [batch, seq, dim].
         """
         if not self.is_initialized:
-            raise RuntimeError("Memory not initialized. Call reset(device, dtype) first.")
+            raise RuntimeError("Memory not initialized. Call reset() first.")
 
-        # Apply activation function: σ(Q) = ELU(Q) + 1
-        sigma_q = elu_plus_one(queries)  # [batch, seq, memory_dim]
+        sigma_q = elu_plus_one(queries)
 
-        # Retrieve: (σ(Q) @ M)
-        # [batch, seq, memory_dim] @ [memory_dim, memory_dim] -> [batch, seq, memory_dim]
+        # (σ(Q) @ M)
         retrieved = torch.matmul(sigma_q, self.M)
 
-        # Compute normalization: σ(Q) @ z
-        # [batch, seq, memory_dim] @ [memory_dim] -> [batch, seq]
+        # σ(Q) @ z
         norm = torch.matmul(sigma_q, self.z)
 
-        # Normalize with eps for numerical stability
-        # Keep dimension for broadcasting: [batch, seq, 1]
+        # Normalize
         output = retrieved / (norm.unsqueeze(-1) + self.eps)
 
         return output
 
     def extra_repr(self) -> str:
-        """Return extra representation string for printing."""
-        return f"memory_dim={self._memory_dim}, eps={self.eps}"
+        """Return extra representation string."""
+        return f"dim={self._dim}, eps={self.eps}"
+
+
+class MultiHeadMemory(nn.Module):
+    """
+    Multi-head wrapper for TensorMemory.
+
+    Creates multiple independent TensorMemory instances, one per head.
+    This is a convenience wrapper for multi-head attention patterns.
+
+    Args:
+        num_heads: Number of memory heads.
+        head_dim: Dimension per head.
+        eps: Small constant for numerical stability.
+
+    Example:
+        >>> mh_memory = MultiHeadMemory(num_heads=8, head_dim=64)
+        >>> mh_memory.reset(device="cuda")
+        >>>
+        >>> # keys/values: [batch, num_heads, seq, head_dim]
+        >>> keys = torch.randn(4, 8, 128, 64, device="cuda")
+        >>> values = torch.randn(4, 8, 128, 64, device="cuda")
+        >>> mh_memory.update(keys, values)
+        >>>
+        >>> queries = torch.randn(4, 8, 32, 64, device="cuda")
+        >>> output = mh_memory.retrieve(queries)  # [4, 8, 32, 64]
+    """
+
+    def __init__(
+        self,
+        num_heads: int,
+        head_dim: int,
+        eps: float = 1e-6,
+    ) -> None:
+        """Initialize MultiHeadMemory."""
+        super().__init__()
+        self.num_heads = num_heads
+        self.head_dim = head_dim
+
+        self.memories = nn.ModuleList(
+            [TensorMemory(dim=head_dim, eps=eps) for _ in range(num_heads)]
+        )
+
+    @property
+    def is_initialized(self) -> bool:
+        """Check if all memories are initialized."""
+        return all(m.is_initialized for m in self.memories)
+
+    def reset(
+        self,
+        device: torch.device | str | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> None:
+        """Reset all memories."""
+        for memory in self.memories:
+            memory.reset(device=device, dtype=dtype)
+
+    def update(
+        self,
+        keys: torch.Tensor,
+        values: torch.Tensor,
+    ) -> None:
+        """
+        Update all memories.
+
+        Args:
+            keys: [batch, num_heads, seq, head_dim]
+            values: [batch, num_heads, seq, head_dim]
+        """
+        for h, memory in enumerate(self.memories):
+            memory.update(keys[:, h], values[:, h])
+
+    def retrieve(
+        self,
+        queries: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Retrieve from all memories.
+
+        Args:
+            queries: [batch, num_heads, seq, head_dim]
+
+        Returns:
+            [batch, num_heads, seq, head_dim]
+        """
+        outputs = []
+        for h, memory in enumerate(self.memories):
+            out = memory.retrieve(queries[:, h])
+            outputs.append(out)
+
+        return torch.stack(outputs, dim=1)
+
+    def extra_repr(self) -> str:
+        """Return extra representation string."""
+        return f"num_heads={self.num_heads}, head_dim={self.head_dim}"

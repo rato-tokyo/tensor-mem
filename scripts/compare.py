@@ -5,8 +5,7 @@ This script trains both models on WikiText-2 and compares:
 - Train/Val Perplexity (PPL)
 - Context dependency: accuracy at different distances from context
 
-Configuration: config.py
-Model definitions: models.py
+Configuration and model definitions: models.py
 
 Usage:
     python scripts/compare.py
@@ -22,9 +21,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import torch
 
 from analysis import ContextDependencyResult, analyze_context_dependency, print_results
-from config import EXPERIMENT_CONFIG
 from data import batchify, build_vocab, download_wikitext2, tokenize
-from models import create_standard_transformer_model, create_tensor_memory_model
+from models import (
+    EXPERIMENT_CONFIG,
+    create_standard_transformer_model,
+    create_tensor_memory_model,
+)
 from training import TrainingResult, train_model
 
 

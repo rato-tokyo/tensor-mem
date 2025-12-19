@@ -43,23 +43,6 @@ def custom_eps_config(dim: int = 64, eps: float = 1e-8) -> MemoryConfig:
     )
 
 
-def custom_clamp_config(
-    dim: int = 64,
-    max_delta: float = 1.0,
-    max_memory: float = 10.0,
-    max_norm: float = 100.0,
-) -> MemoryConfig:
-    """Create config with custom clamping values."""
-    return MemoryConfig(
-        dim=dim,
-        eps=1e-6,
-        use_delta_rule=False,
-        max_delta=max_delta,
-        max_memory=max_memory,
-        max_norm=max_norm,
-    )
-
-
 def decaying_config(dim: int = 64, decay: float = 0.95) -> DecayingMemoryConfig:
     """Create default decaying memory config for tests."""
     return DecayingMemoryConfig(

@@ -465,6 +465,9 @@ def main() -> None:
     parser.add_argument("--num-layers", type=int, default=4, help="Number of layers")
     parser.add_argument("--d-ff", type=int, default=1024, help="FFN dimension")
     parser.add_argument("--vocab-size", type=int, default=10000, help="Vocabulary size")
+    parser.add_argument(
+        "--data-fraction", type=float, default=1.0, help="Fraction of data to use (0.25 = 1/4)"
+    )
     args = parser.parse_args()
 
     device = torch.device(args.device)
@@ -491,6 +494,13 @@ def main() -> None:
     print("Tokenizing...")
     train_tokens = tokenize(train_text, vocab)
     val_tokens = tokenize(val_text, vocab)
+
+    # Apply data fraction
+    if args.data_fraction < 1.0:
+        train_tokens = train_tokens[: int(len(train_tokens) * args.data_fraction)]
+        val_tokens = val_tokens[: int(len(val_tokens) * args.data_fraction)]
+        print(f"Using {args.data_fraction:.0%} of data")
+
     print(f"Train tokens: {len(train_tokens):,}, Val tokens: {len(val_tokens):,}")
 
     # Batchify

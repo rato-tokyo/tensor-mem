@@ -44,9 +44,6 @@ class BaseTensorMemory(nn.Module, ABC):
         self._dim = config.dim
         self.eps = config.eps
         self.use_delta_rule = config.use_delta_rule
-        self.max_delta = config.max_delta
-        self.max_memory = config.max_memory
-        self.max_norm = config.max_norm
 
         self.register_buffer("M", None, persistent=False)
         self.register_buffer("z", None, persistent=False)
@@ -159,23 +156,10 @@ class BaseTensorMemory(nn.Module, ABC):
         delta_m = torch.einsum("bsd,bse->de", sigma_k, update_values)
         delta_m = delta_m / (batch * seq)
 
-        # Clamp delta to prevent overflow (especially in fp16)
-        delta_m = torch.clamp(delta_m, min=-self.max_delta, max=self.max_delta)
-
         # z update: Σσ(K) / batch
         delta_z = sigma_k.sum(dim=(0, 1)) / batch
 
         return sigma_k, delta_m, delta_z
-
-    def _clamp_memory(self) -> None:
-        """
-        Clamp memory values to prevent numerical instability.
-
-        Ensures M stays within [-max_memory, max_memory] and
-        z stays within [eps, max_norm].
-        """
-        self.M = torch.clamp(self.M, min=-self.max_memory, max=self.max_memory)
-        self.z = torch.clamp(self.z, min=self.eps, max=self.max_norm)
 
     def retrieve(
         self,

@@ -17,9 +17,6 @@ def create_memory_config(
         dim=head_dim,
         eps=eps,
         use_delta_rule=use_delta_rule,
-        max_delta=10.0,
-        max_memory=100.0,
-        max_norm=1000.0,
     )
 
 
@@ -361,33 +358,7 @@ class TestNumericalStability:
         assert not torch.isnan(output).any()
         assert not torch.isinf(output).any()
 
-        # Memory values should be bounded
+        # Memory values should be valid
         for m in attn.memory.memories:
             assert not torch.isnan(m.M).any()
             assert not torch.isinf(m.M).any()
-            assert m.M.abs().max() <= m.max_memory
-
-    def test_clamping_prevents_explosion(self):
-        """Clamping should prevent memory explosion."""
-        config = MemoryConfig(
-            dim=64,
-            eps=1e-6,
-            use_delta_rule=False,
-            max_delta=1.0,
-            max_memory=10.0,
-            max_norm=100.0,
-        )
-        memory = TensorMemory(config)
-        memory.reset()
-
-        # Repeatedly update with large values
-        for _ in range(50):
-            keys = torch.randn(2, 100, 64) * 5
-            values = torch.randn(2, 100, 64) * 5
-            memory.update(keys, values)
-
-        # Memory should be bounded
-        assert memory.M.abs().max() <= memory.max_memory
-        assert memory.z.max() <= memory.max_norm
-        assert not torch.isnan(memory.M).any()
-        assert not torch.isinf(memory.M).any()

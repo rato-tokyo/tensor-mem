@@ -32,9 +32,7 @@ class DecayingTensorMemory(BaseTensorMemory):
 
     Example:
         >>> from tensor_mem.memory.config import DecayingMemoryConfig
-        >>> config = DecayingMemoryConfig(dim=64, eps=1e-6, use_delta_rule=False,
-        ...                               max_delta=10.0, max_memory=100.0,
-        ...                               max_norm=1000.0, decay=0.95)
+        >>> config = DecayingMemoryConfig(dim=64, eps=1e-6, use_delta_rule=False, decay=0.95)
         >>> memory = DecayingTensorMemory(config)
         >>> memory.reset(device="cuda", dtype=torch.float16)
         >>>
@@ -79,8 +77,6 @@ class DecayingTensorMemory(BaseTensorMemory):
         # Apply exponential decay: M = decay * M + (1 - decay) * delta_m
         self.M = self.decay * self.M + (1.0 - self.decay) * delta_m
         self.z = self.decay * self.z + (1.0 - self.decay) * delta_z
-
-        self._clamp_memory()
 
     def _extra_repr_fields(self) -> list[str]:
         """Return list of field strings for extra_repr."""

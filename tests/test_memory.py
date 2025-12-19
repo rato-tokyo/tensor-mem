@@ -13,9 +13,6 @@ def default_config(dim: int = 64) -> MemoryConfig:
         dim=dim,
         eps=1e-6,
         use_delta_rule=False,
-        max_delta=10.0,
-        max_memory=100.0,
-        max_norm=1000.0,
     )
 
 
@@ -25,9 +22,6 @@ def delta_rule_config(dim: int = 64) -> MemoryConfig:
         dim=dim,
         eps=1e-6,
         use_delta_rule=True,
-        max_delta=10.0,
-        max_memory=100.0,
-        max_norm=1000.0,
     )
 
 
@@ -37,9 +31,6 @@ def custom_eps_config(dim: int = 64, eps: float = 1e-8) -> MemoryConfig:
         dim=dim,
         eps=eps,
         use_delta_rule=False,
-        max_delta=10.0,
-        max_memory=100.0,
-        max_norm=1000.0,
     )
 
 
@@ -49,9 +40,6 @@ def decaying_config(dim: int = 64, decay: float = 0.95) -> DecayingMemoryConfig:
         dim=dim,
         eps=1e-6,
         use_delta_rule=False,
-        max_delta=10.0,
-        max_memory=100.0,
-        max_norm=1000.0,
         decay=decay,
     )
 
@@ -372,9 +360,6 @@ class TestMultiHeadMemory:
             dim=16,
             eps=1e-8,
             use_delta_rule=True,
-            max_delta=10.0,
-            max_memory=100.0,
-            max_norm=1000.0,
         )
         memories = [TensorMemory(config) for _ in range(2)]
         mh = MultiHeadMemory(memories)
@@ -559,7 +544,6 @@ class TestDecayingTensorMemoryUpdate:
         # Due to decay, memory shouldn't explode
         assert not torch.isnan(memory.M).any()
         assert not torch.isinf(memory.M).any()
-        assert memory.M.abs().max() <= memory.max_memory
 
 
 class TestDecayingTensorMemoryRetrieve:
@@ -636,7 +620,7 @@ class TestDecayingTensorMemoryVsTensorMemory:
             memory_normal.update(keys, values)
             memory_decaying.update(keys, values)
 
-        # Normal memory z grows without bound (clamped at max_norm)
+        # Normal memory z grows without bound
         # Decaying memory z stays bounded by the decay
         # This is the key difference
         assert memory_normal.z.mean() > memory_decaying.z.mean()

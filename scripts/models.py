@@ -39,9 +39,6 @@ MEMORY_CONFIG = MemoryConfig(
     dim=HEAD_DIM,
     eps=1e-6,
     use_delta_rule=False,
-    max_delta=10.0,
-    max_memory=100.0,
-    max_norm=1000.0,
 )
 
 

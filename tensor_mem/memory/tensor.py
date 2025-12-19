@@ -28,19 +28,13 @@ class TensorMemory(BaseTensorMemory):
         M = M + σ(K)^T @ delta_v / (batch * seq)
         This prevents duplicate bindings and improves long-context performance.
 
-    Numerical Stability:
-        - delta_m is clamped to [-max_delta, max_delta] to prevent overflow
-        - M is clamped to [-max_memory, max_memory] to prevent accumulation explosion
-        - z is clamped to [eps, max_norm] to ensure valid normalization
-
     For multi-head attention, create multiple TensorMemory instances.
 
     Uses config-based initialization - no default arguments.
 
     Example:
         >>> from tensor_mem.memory.config import MemoryConfig
-        >>> config = MemoryConfig(dim=64, eps=1e-6, use_delta_rule=False,
-        ...                       max_delta=10.0, max_memory=100.0, max_norm=1000.0)
+        >>> config = MemoryConfig(dim=64, eps=1e-6, use_delta_rule=False)
         >>> memory = TensorMemory(config)
         >>> memory.reset(device="cuda", dtype=torch.float16)
         >>>
@@ -80,5 +74,3 @@ class TensorMemory(BaseTensorMemory):
         # Accumulative update: M = M + delta_m, z = z + delta_z
         self.M = self.M + delta_m
         self.z = self.z + delta_z
-
-        self._clamp_memory()

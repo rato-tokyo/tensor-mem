@@ -27,8 +27,6 @@ from .memory import (
     MemoryConfig,
     MultiHeadMemory,
     TensorMemory,
-    default_decaying_memory_config,
-    default_memory_config,
 )
 
 __all__ = [
@@ -40,8 +38,6 @@ __all__ = [
     # Memory config classes
     "MemoryConfig",
     "DecayingMemoryConfig",
-    "default_memory_config",
-    "default_decaying_memory_config",
     # Attention
     "LinearMemoryAttention",
     # LLM classes (Declarative Configuration)

@@ -20,8 +20,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import torch
 import torch.nn as nn
+from config import default_memory_config
 
-from tensor_mem import Layer, TensorMemory, TensorMemoryLM, default_memory_config
+from tensor_mem import Layer, TensorMemory, TensorMemoryLM
 
 
 def create_synthetic_dataset(

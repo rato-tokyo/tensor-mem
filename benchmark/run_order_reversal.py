@@ -18,7 +18,8 @@ import torch
 
 from baseline import StandardTransformerBlock, StandardTransformerLM
 from benchmark.order_reversal import OrderReversalBenchmark, print_comparison
-from tensor_mem import Layer, TensorMemory, TensorMemoryLM, default_memory_config
+from scripts.config import default_memory_config
+from tensor_mem import Layer, TensorMemory, TensorMemoryLM
 
 
 def main() -> None:

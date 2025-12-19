@@ -4,8 +4,6 @@ from .base import BaseTensorMemory
 from .config import (
     DecayingMemoryConfig,
     MemoryConfig,
-    default_decaying_memory_config,
-    default_memory_config,
 )
 from .decaying import DecayingTensorMemory
 from .multi_head import MultiHeadMemory
@@ -18,6 +16,4 @@ __all__ = [
     "MemoryConfig",
     "MultiHeadMemory",
     "TensorMemory",
-    "default_decaying_memory_config",
-    "default_memory_config",
 ]

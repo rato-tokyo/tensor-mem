@@ -51,86 +51,50 @@ The order matters for causality:
 
 This ensures current tokens don't attend to themselves through memory.
 
-## Declarative Configuration Design Pattern
+## Declarative Configuration - IMMUTABLE RULE
 
-**Model structure is defined declaratively - what you see is what you get.**
+**モデル構造は呼び出し側で直接見える形で記述する。**
 
-The entire model architecture is visible at the construction site.
-No hidden `num_layers` or `num_heads` parameters that magically create objects internally.
+このルールは削除・変更不可。ファクトリ関数でモデルを生成することは禁止。
 
-### Core Principle
+### 正しい形式
 
 ```python
-# Structure is explicit and visible
 model = TensorMemoryLM(
-    vocab_size=32,
-    dropout=0.1,
+    vocab_size=32000,
     layers=[
-        TensorMemoryBlock(
-            attention=LinearMemoryAttention(
-                memory=MultiHeadMemory([
-                    TensorMemory(config) for _ in range(4)  # 4 heads visible
-                ]),
-                hidden_size=256,
-                bias=True,
-                normalize_qkv=False,
-            ),
-            d_ff=1024,
-            dropout=0.1,
-        ),
-        # ... more layers explicitly listed
+        Layer([TensorMemory(config), TensorMemory(config), TensorMemory(config), TensorMemory(config)]),
+        Layer([TensorMemory(config), TensorMemory(config), TensorMemory(config), TensorMemory(config)]),
+        Layer([TensorMemory(config), TensorMemory(config), TensorMemory(config), TensorMemory(config)]),
+        Layer([TensorMemory(config), TensorMemory(config), TensorMemory(config), TensorMemory(config)]),
     ],
 )
 ```
 
+この形式では：
+- 4レイヤーであることが一目でわかる
+- 各レイヤーに4つのメモリヘッドがあることが見える
+- 構造と設定が一元化されている
+
 ### Why This Design?
 
-1. **Transparency**: Model structure visible at a glance
-2. **No magic numbers**: `num_layers=4, num_heads=8` hidden in config → actual objects listed
-3. **Flexibility**: Each layer/head can have different configuration if needed
-4. **Debuggability**: Easy to inspect what was actually created
+1. **透明性**: 構造が一目でわかる
+2. **一元化**: 設定と構造が同じ場所にある
+3. **柔軟性**: 各レイヤー/ヘッドに異なる設定を適用可能
+4. **デバッグ容易性**: 実際のオブジェクトを直接確認できる
 
-### Factory Functions for Convenience
-
-For common configurations, use factory functions that return the declarative structure:
+### Anti-pattern (NEVER do this)
 
 ```python
-def small_model(vocab_size: int) -> TensorMemoryLM:
-    """Create a small model with 4 layers, 4 heads."""
-    memory_config = default_memory_config(dim=64)
+# BAD: ファクトリ関数で構造を隠す
+model = small_model(vocab_size=32000, memory_type="standard")
 
-    def make_layer() -> TensorMemoryBlock:
-        return TensorMemoryBlock(
-            attention=LinearMemoryAttention(
-                memory=MultiHeadMemory([
-                    TensorMemory(memory_config) for _ in range(4)
-                ]),
-                hidden_size=256,
-                bias=True,
-                normalize_qkv=False,
-            ),
-            d_ff=1024,
-            dropout=0.1,
-        )
-
-    return TensorMemoryLM(
-        vocab_size=vocab_size,
-        dropout=0.1,
-        layers=[make_layer() for _ in range(4)],
-    )
+# BAD: Configオブジェクトで構造を隠す
+config = LMConfig(num_layers=4, num_heads=8, ...)
+model = create_model(config)
 ```
 
-### Anti-pattern (Do NOT do this)
-
-```python
-# BAD: Hidden structure in config
-config = LMConfig(
-    num_layers=4,      # Creates 4 layers internally - not visible
-    num_heads=8,       # Creates 8 heads per layer - not visible
-    memory=MemoryConfig(...),  # One config, but 32 memories created
-)
-model = create_model(config)  # Magic happens inside
-```
+ファクトリ関数やConfigオブジェクトは構造を隠蔽するため禁止。
 
 ## Dependency Injection
 

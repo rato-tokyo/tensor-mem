@@ -3,16 +3,23 @@
 This package provides:
 - Memory: TensorMemory, DecayingTensorMemory, MultiHeadMemory
 - Attention: LinearMemoryAttention
-- LLM: TensorMemoryLM, TensorMemoryBlock, factory functions
+- LLM: TensorMemoryLM, Layer
+
+Declarative Configuration:
+    model = TensorMemoryLM(
+        vocab_size=32000,
+        dropout=0.1,
+        layers=[
+            Layer([TensorMemory(config), ...], hidden_size=256, ...),
+            Layer([TensorMemory(config), ...], hidden_size=256, ...),
+        ],
+    )
 """
 
 from .attention import LinearMemoryAttention
 from .llm import (
-    TensorMemoryBlock,
+    Layer,
     TensorMemoryLM,
-    large_model,
-    medium_model,
-    small_model,
 )
 from .memory import (
     BaseTensorMemory,
@@ -38,13 +45,9 @@ __all__ = [
     "default_decaying_memory_config",
     # Attention
     "LinearMemoryAttention",
-    # LLM classes
-    "TensorMemoryBlock",
+    # LLM classes (Declarative Configuration)
+    "Layer",
     "TensorMemoryLM",
-    # Factory functions (Declarative Configuration)
-    "large_model",
-    "medium_model",
-    "small_model",
 ]
 
 __version__ = "0.1.0"

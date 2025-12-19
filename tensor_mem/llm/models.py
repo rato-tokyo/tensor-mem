@@ -1,7 +1,16 @@
 """Tensor Memory LLM models.
 
 TensorMemoryLM: Pure tensor product memory without positional encoding (NoPE).
-TensorMemoryBlock: Transformer block using tensor product memory attention.
+Layer: Single transformer layer with tensor product memory attention.
+
+Declarative Configuration:
+    model = TensorMemoryLM(
+        vocab_size=32000,
+        layers=[
+            Layer([TensorMemory(config), TensorMemory(config), ...]),
+            Layer([TensorMemory(config), TensorMemory(config), ...]),
+        ],
+    )
 """
 
 from __future__ import annotations
@@ -12,26 +21,48 @@ import torch
 import torch.nn as nn
 
 from tensor_mem.attention import LinearMemoryAttention
+from tensor_mem.memory import BaseTensorMemory, MultiHeadMemory
 
 
-class TensorMemoryBlock(nn.Module):
-    """Transformer block using tensor product memory attention.
+class Layer(nn.Module):
+    """Single transformer layer with tensor product memory attention.
 
-    Uses Dependency Injection - receives a pre-configured LinearMemoryAttention.
+    Declarative Configuration: receives list of memory instances directly.
+
+    Args:
+        memories: List of TensorMemory or DecayingTensorMemory instances.
+        hidden_size: Hidden dimension of the model.
+        d_ff: Feed-forward dimension.
+        dropout: Dropout rate.
+        bias: Whether to use bias in attention projections.
+        normalize_qkv: Whether to L2 normalize Q, K, V.
     """
 
-    def __init__(self, attention: LinearMemoryAttention, d_ff: int, dropout: float) -> None:
+    def __init__(
+        self,
+        memories: list[BaseTensorMemory],
+        hidden_size: int,
+        d_ff: int,
+        dropout: float,
+        bias: bool,
+        normalize_qkv: bool,
+    ) -> None:
         super().__init__()
-        self.attention = attention
-        d_model = attention.hidden_size
 
-        self.norm1 = nn.LayerNorm(d_model)
-        self.norm2 = nn.LayerNorm(d_model)
+        self.attention = LinearMemoryAttention(
+            memory=MultiHeadMemory(memories),
+            hidden_size=hidden_size,
+            bias=bias,
+            normalize_qkv=normalize_qkv,
+        )
+
+        self.norm1 = nn.LayerNorm(hidden_size)
+        self.norm2 = nn.LayerNorm(hidden_size)
         self.ffn = nn.Sequential(
-            nn.Linear(d_model, d_ff),
+            nn.Linear(hidden_size, d_ff),
             nn.GELU(),
             nn.Dropout(dropout),
-            nn.Linear(d_ff, d_model),
+            nn.Linear(d_ff, hidden_size),
             nn.Dropout(dropout),
         )
 
@@ -51,10 +82,21 @@ class TensorMemoryBlock(nn.Module):
 class TensorMemoryLM(nn.Module):
     """Tensor product memory language model without positional encoding (NoPE).
 
-    Uses Dependency Injection - receives pre-configured layer blocks.
+    Declarative Configuration: structure is visible at construction site.
+
+    Example:
+        >>> config = default_memory_config(dim=64)
+        >>> model = TensorMemoryLM(
+        ...     vocab_size=32000,
+        ...     dropout=0.1,
+        ...     layers=[
+        ...         Layer([TensorMemory(config), TensorMemory(config)], hidden_size=128, ...),
+        ...         Layer([TensorMemory(config), TensorMemory(config)], hidden_size=128, ...),
+        ...     ],
+        ... )
     """
 
-    def __init__(self, vocab_size: int, layers: list[TensorMemoryBlock], dropout: float) -> None:
+    def __init__(self, vocab_size: int, dropout: float, layers: list[Layer]) -> None:
         super().__init__()
 
         if not layers:

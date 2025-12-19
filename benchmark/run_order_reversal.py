@@ -18,7 +18,7 @@ import torch
 
 from baseline import StandardTransformerConfig, create_standard_transformer_lm
 from benchmark.order_reversal import OrderReversalBenchmark, print_comparison
-from tensor_mem import small_model
+from tensor_mem import Layer, TensorMemory, TensorMemoryLM, default_memory_config
 
 
 def main() -> None:
@@ -35,8 +35,20 @@ def main() -> None:
     # Create models
     print("\nInitializing models...")
 
+    # Declarative Configuration: structure is visible here
+    config = default_memory_config(dim=64)
+
     # TensorMemoryLM: 4 layers, 4 heads, hidden=256, d_ff=1024
-    tensor_mem_model = small_model(vocab_size=vocab_size, memory_type="standard")
+    tensor_mem_model = TensorMemoryLM(
+        vocab_size=vocab_size,
+        dropout=0.1,
+        layers=[
+            Layer([TensorMemory(config), TensorMemory(config), TensorMemory(config), TensorMemory(config)], hidden_size=256, d_ff=1024, dropout=0.1, bias=True, normalize_qkv=False),
+            Layer([TensorMemory(config), TensorMemory(config), TensorMemory(config), TensorMemory(config)], hidden_size=256, d_ff=1024, dropout=0.1, bias=True, normalize_qkv=False),
+            Layer([TensorMemory(config), TensorMemory(config), TensorMemory(config), TensorMemory(config)], hidden_size=256, d_ff=1024, dropout=0.1, bias=True, normalize_qkv=False),
+            Layer([TensorMemory(config), TensorMemory(config), TensorMemory(config), TensorMemory(config)], hidden_size=256, d_ff=1024, dropout=0.1, bias=True, normalize_qkv=False),
+        ],
+    )
 
     # Get structure info from the model
     num_layers = len(tensor_mem_model.layers)

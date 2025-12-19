@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import torch
 import torch.nn as nn
 
-from tensor_mem import small_model
+from tensor_mem import Layer, TensorMemory, TensorMemoryLM, default_memory_config
 
 
 def create_synthetic_dataset(
@@ -144,9 +144,21 @@ def main() -> None:
     device = torch.device(args.device)
     print(f"Training on device: {device}")
 
-    # Create model using Declarative Configuration
+    # Declarative Configuration: structure is visible here
     print("\nCreating model...")
-    model = small_model(vocab_size=args.vocab_size, memory_type="standard").to(device)
+    config = default_memory_config(dim=64)
+
+    # TensorMemoryLM: 4 layers, 4 heads, hidden=256, d_ff=1024
+    model = TensorMemoryLM(
+        vocab_size=args.vocab_size,
+        dropout=0.1,
+        layers=[
+            Layer([TensorMemory(config), TensorMemory(config), TensorMemory(config), TensorMemory(config)], hidden_size=256, d_ff=1024, dropout=0.1, bias=True, normalize_qkv=False),
+            Layer([TensorMemory(config), TensorMemory(config), TensorMemory(config), TensorMemory(config)], hidden_size=256, d_ff=1024, dropout=0.1, bias=True, normalize_qkv=False),
+            Layer([TensorMemory(config), TensorMemory(config), TensorMemory(config), TensorMemory(config)], hidden_size=256, d_ff=1024, dropout=0.1, bias=True, normalize_qkv=False),
+            Layer([TensorMemory(config), TensorMemory(config), TensorMemory(config), TensorMemory(config)], hidden_size=256, d_ff=1024, dropout=0.1, bias=True, normalize_qkv=False),
+        ],
+    ).to(device)
 
     # Get structure info from the actual model
     num_layers = len(model.layers)

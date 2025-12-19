@@ -1,0 +1,71 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tensor-mem"
+version = "0.1.0"
+description = "Linear Attention with Tensor Product Memory - lightweight library for infinite context transformers"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11,<3.12"
+authors = [
+    { name = "tensor-mem contributors" }
+]
+keywords = [
+    "deep-learning",
+    "transformers",
+    "attention",
+    "linear-attention",
+    "memory",
+    "pytorch",
+    "machine-learning",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "torch>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/your-org/tensor-mem"
+Documentation = "https://github.com/your-org/tensor-mem#readme"
+Repository = "https://github.com/your-org/tensor-mem"
+Issues = "https://github.com/your-org/tensor-mem/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["tensor_mem"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --tb=short"

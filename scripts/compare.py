@@ -54,40 +54,25 @@ class ContextDependencyResult:
 def download_wikitext2() -> tuple[str, str, str]:
     """Download WikiText-2 dataset and return train/val/test text."""
     import urllib.request
-    import zipfile
-    import tempfile
-    import os
     import ssl
 
-    # Try multiple URLs (the original URL moved)
-    urls = [
-        "https://raw.githubusercontent.com/pytorch/examples/main/word_language_model/data/wikitext-2/train.txt",
-    ]
-
-    # Use Hugging Face datasets as primary source (most reliable)
+    # Try datasets library first (most reliable for Hugging Face)
     try:
-        print("Downloading WikiText-2 from Hugging Face...")
-        from huggingface_hub import hf_hub_download
+        print("Downloading WikiText-2 using datasets library...")
+        from datasets import load_dataset
 
-        train_path = hf_hub_download(
-            repo_id="Salesforce/wikitext", filename="wikitext-2-raw-v1/train.parquet", repo_type="dataset"
-        )
-        val_path = hf_hub_download(
-            repo_id="Salesforce/wikitext", filename="wikitext-2-raw-v1/validation.parquet", repo_type="dataset"
-        )
-        test_path = hf_hub_download(
-            repo_id="Salesforce/wikitext", filename="wikitext-2-raw-v1/test.parquet", repo_type="dataset"
-        )
+        dataset = load_dataset("wikitext", "wikitext-2-raw-v1")
 
-        import pandas as pd
-        train_text = "\n".join(pd.read_parquet(train_path)["text"].tolist())
-        val_text = "\n".join(pd.read_parquet(val_path)["text"].tolist())
-        test_text = "\n".join(pd.read_parquet(test_path)["text"].tolist())
+        train_text = "\n".join(dataset["train"]["text"])
+        val_text = "\n".join(dataset["validation"]["text"])
+        test_text = "\n".join(dataset["test"]["text"])
 
         return train_text, val_text, test_text
 
     except ImportError:
-        print("huggingface_hub not available, trying alternative source...")
+        print("datasets library not available, trying alternative source...")
+    except Exception as e:
+        print(f"datasets library failed: {e}, trying alternative source...")
 
     # Fallback: Try raw GitHub (PyTorch examples)
     try:
@@ -113,8 +98,8 @@ def download_wikitext2() -> tuple[str, str, str]:
     except Exception as e:
         print(f"Failed to download: {e}")
         raise RuntimeError(
-            "Could not download WikiText-2. Please install huggingface_hub:\n"
-            "  pip install huggingface_hub pandas pyarrow"
+            "Could not download WikiText-2. Please install datasets:\n"
+            "  pip install datasets"
         )
 
 

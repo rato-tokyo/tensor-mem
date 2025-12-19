@@ -92,7 +92,7 @@ def train_step(
     loss.backward()
     optimizer.step()
 
-    return loss.item()
+    return float(loss.item())
 
 
 def evaluate(

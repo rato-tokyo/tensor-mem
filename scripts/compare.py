@@ -1,26 +1,20 @@
 #!/usr/bin/env python3
-"""Compare TensorMemoryLM vs StandardTransformerLM on Associative Recall task.
+"""Compare TensorMemoryLM vs StandardTransformerLM on WikiText.
 
-This script trains both models on an associative recall task and compares:
-- Recall accuracy (can the model remember and retrieve key-value pairs?)
-- Training speed (loss convergence)
-- Parameter count
-
-The Associative Recall task:
-    Input:  [K1, V1, K2, V2, ..., Kn, Vn, SEP, Q1, ?, Q2, ?, ...]
-    Output: Model should predict Vi when given Ki as query
-
-This task directly tests the memory retrieval capability that TensorMemoryLM
-is designed for.
+This script trains both models on WikiText-2 and compares:
+- Train/Val Perplexity (PPL)
+- Context dependency: accuracy at different distances from context
 
 Usage:
-    python scripts/compare.py
-    python scripts/compare.py --epochs 100 --device cuda
+    python scripts/compare.py --device cuda
+    python scripts/compare.py --device cuda --max-epochs 100
 """
 
 from __future__ import annotations
 
 import argparse
+import copy
+import math
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,7 +24,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import torch
 import torch.nn as nn
 from config import default_memory_config
-from training import count_parameters, create_associative_recall_dataset
 
 from baseline import StandardTransformerBlock, StandardTransformerLM
 from tensor_mem import Layer, TensorMemory, TensorMemoryLM
@@ -42,10 +35,100 @@ class TrainingResult:
 
     name: str
     num_params: int
-    final_loss: float
-    final_recall_accuracy: float
-    loss_history: list[float]
-    recall_accuracy_history: list[float]
+    best_val_ppl: float
+    best_epoch: int
+    train_ppl_history: list[float]
+    val_ppl_history: list[float]
+
+
+@dataclass
+class ContextDependencyResult:
+    """Result of context dependency analysis."""
+
+    name: str
+    # Accuracy at different context distances
+    # distance 1 = predict from 1 previous token, distance 10 = need 10+ tokens of context
+    distance_accuracies: dict[str, float]
+
+
+def download_wikitext2() -> tuple[str, str, str]:
+    """Download WikiText-2 dataset and return train/val/test text."""
+    import urllib.request
+    import zipfile
+    import tempfile
+    import os
+
+    url = "https://s3.amazonaws.com/research.metamind.io/wikitext/wikitext-2-v1.zip"
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        zip_path = os.path.join(tmpdir, "wikitext-2-v1.zip")
+        print("Downloading WikiText-2...")
+        urllib.request.urlretrieve(url, zip_path)
+
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall(tmpdir)
+
+        base = os.path.join(tmpdir, "wikitext-2")
+
+        with open(os.path.join(base, "wiki.train.tokens"), "r", encoding="utf-8") as f:
+            train_text = f.read()
+        with open(os.path.join(base, "wiki.valid.tokens"), "r", encoding="utf-8") as f:
+            val_text = f.read()
+        with open(os.path.join(base, "wiki.test.tokens"), "r", encoding="utf-8") as f:
+            test_text = f.read()
+
+    return train_text, val_text, test_text
+
+
+def build_vocab(text: str, max_vocab: int) -> tuple[dict[str, int], dict[int, str]]:
+    """Build vocabulary from text."""
+    from collections import Counter
+
+    words = text.split()
+    word_counts = Counter(words)
+
+    # Reserve 0 for <unk>, 1 for <eos>
+    vocab = {"<unk>": 0, "<eos>": 1}
+
+    for word, _ in word_counts.most_common(max_vocab - 2):
+        vocab[word] = len(vocab)
+
+    inv_vocab = {v: k for k, v in vocab.items()}
+    return vocab, inv_vocab
+
+
+def tokenize(text: str, vocab: dict[str, int]) -> list[int]:
+    """Tokenize text using vocabulary."""
+    unk_id = vocab["<unk>"]
+    eos_id = vocab["<eos>"]
+
+    tokens = []
+    for line in text.strip().split("\n"):
+        line = line.strip()
+        if line:
+            for word in line.split():
+                tokens.append(vocab.get(word, unk_id))
+            tokens.append(eos_id)
+
+    return tokens
+
+
+def batchify(data: list[int], batch_size: int, device: torch.device) -> torch.Tensor:
+    """Reshape data into [seq_len, batch_size] for language modeling."""
+    nbatch = len(data) // batch_size
+    data = data[:nbatch * batch_size]
+    data = torch.tensor(data, dtype=torch.long, device=device)
+    return data.view(batch_size, -1).t().contiguous()
+
+
+def get_batch(
+    source: torch.Tensor, i: int, seq_len: int
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Get a batch of data for language modeling."""
+    seq_len = min(seq_len, len(source) - 1 - i)
+    data = source[i:i + seq_len].t()  # [batch, seq_len]
+    target = source[i + 1:i + 1 + seq_len].t()  # [batch, seq_len]
+    return data, target
 
 
 def create_tensor_memory_model(
@@ -81,289 +164,319 @@ def create_standard_model(
     return StandardTransformerLM(vocab_size=vocab_size, max_len=max_len, layers=layers)
 
 
-def train_step_masked(
+def evaluate_ppl(
     model: nn.Module,
-    inputs: torch.Tensor,
-    targets: torch.Tensor,
-    query_mask: torch.Tensor,
-    optimizer: torch.optim.Optimizer,
-    criterion: nn.Module,
+    data: torch.Tensor,
+    seq_len: int,
     has_memory: bool,
 ) -> float:
-    """Training step with masked loss (only compute loss at query positions)."""
-    model.train()
-    optimizer.zero_grad()
-
-    if has_memory:
-        model.reset_memory()  # type: ignore
-
-    logits = model(inputs)
-
-    # Flatten for loss computation
-    logits_flat = logits.view(-1, logits.size(-1))
-    targets_flat = targets.view(-1)
-    mask_flat = query_mask.view(-1)
-
-    # Only compute loss at query positions
-    masked_logits = logits_flat[mask_flat]
-    masked_targets = targets_flat[mask_flat]
-
-    loss = criterion(masked_logits, masked_targets)
-    loss.backward()
-    optimizer.step()
-
-    return float(loss.item())
-
-
-def evaluate_recall(
-    model: nn.Module,
-    inputs: torch.Tensor,
-    targets: torch.Tensor,
-    query_mask: torch.Tensor,
-    criterion: nn.Module,
-    has_memory: bool,
-) -> tuple[float, float]:
-    """Evaluate recall accuracy at query positions only."""
+    """Evaluate perplexity on data."""
     model.eval()
+    criterion = nn.CrossEntropyLoss()
+    total_loss = 0.0
+    total_tokens = 0
 
     if has_memory:
         model.reset_memory()  # type: ignore
 
     with torch.no_grad():
+        for i in range(0, data.size(0) - 1, seq_len):
+            inputs, targets = get_batch(data, i, seq_len)
+
+            if has_memory:
+                model.reset_memory()  # type: ignore
+
+            logits = model(inputs)
+            loss = criterion(logits.reshape(-1, logits.size(-1)), targets.reshape(-1))
+
+            total_loss += loss.item() * targets.numel()
+            total_tokens += targets.numel()
+
+    avg_loss = total_loss / total_tokens
+    ppl = math.exp(avg_loss)
+    return ppl
+
+
+def train_epoch(
+    model: nn.Module,
+    train_data: torch.Tensor,
+    optimizer: torch.optim.Optimizer,
+    criterion: nn.Module,
+    seq_len: int,
+    clip: float,
+    has_memory: bool,
+) -> float:
+    """Train for one epoch."""
+    model.train()
+    total_loss = 0.0
+    total_tokens = 0
+
+    for i in range(0, train_data.size(0) - 1, seq_len):
+        inputs, targets = get_batch(train_data, i, seq_len)
+
+        if has_memory:
+            model.reset_memory()  # type: ignore
+
+        optimizer.zero_grad()
         logits = model(inputs)
-        predictions = logits.argmax(dim=-1)
+        loss = criterion(logits.reshape(-1, logits.size(-1)), targets.reshape(-1))
+        loss.backward()
 
-        # Flatten
-        predictions_flat = predictions.view(-1)
-        targets_flat = targets.view(-1)
-        mask_flat = query_mask.view(-1)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
+        optimizer.step()
 
-        # Loss at query positions
-        logits_flat = logits.view(-1, logits.size(-1))
-        masked_logits = logits_flat[mask_flat]
-        masked_targets = targets_flat[mask_flat]
-        loss = criterion(masked_logits, masked_targets).item()
+        total_loss += loss.item() * targets.numel()
+        total_tokens += targets.numel()
 
-        # Accuracy at query positions
-        masked_predictions = predictions_flat[mask_flat]
-        correct = (masked_predictions == masked_targets).sum().item()
-        total = mask_flat.sum().item()
-        accuracy = correct / total if total > 0 else 0.0
-
-    return loss, accuracy
+    avg_loss = total_loss / total_tokens
+    return math.exp(avg_loss)
 
 
 def train_model(
     model: nn.Module,
     name: str,
-    train_inputs: torch.Tensor,
-    train_targets: torch.Tensor,
-    train_mask: torch.Tensor,
-    eval_inputs: torch.Tensor,
-    eval_targets: torch.Tensor,
-    eval_mask: torch.Tensor,
-    epochs: int,
-    batch_size: int,
+    train_data: torch.Tensor,
+    val_data: torch.Tensor,
+    max_epochs: int,
+    seq_len: int,
     lr: float,
+    clip: float,
+    patience: int,
     has_memory: bool,
-    eval_interval: int,
-) -> TrainingResult:
-    """Train a model and return results."""
-    num_params = count_parameters(model)
+) -> tuple[TrainingResult, nn.Module]:
+    """Train a model with early stopping."""
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
 
-    loss_history: list[float] = []
-    recall_accuracy_history: list[float] = []
+    num_params = sum(p.numel() for p in model.parameters())
+    train_ppl_history: list[float] = []
+    val_ppl_history: list[float] = []
 
-    for epoch in range(epochs):
-        # Shuffle training data
-        perm = torch.randperm(len(train_inputs))
-        train_inputs_shuffled = train_inputs[perm]
-        train_targets_shuffled = train_targets[perm]
-        train_mask_shuffled = train_mask[perm]
+    best_val_ppl = float("inf")
+    best_epoch = 0
+    best_model_state = None
+    epochs_without_improvement = 0
 
-        # Train epoch
-        for i in range(0, len(train_inputs), batch_size):
-            batch_inputs = train_inputs_shuffled[i : i + batch_size]
-            batch_targets = train_targets_shuffled[i : i + batch_size]
-            batch_mask = train_mask_shuffled[i : i + batch_size]
+    for epoch in range(max_epochs):
+        train_ppl = train_epoch(model, train_data, optimizer, criterion, seq_len, clip, has_memory)
+        val_ppl = evaluate_ppl(model, val_data, seq_len, has_memory)
 
-            train_step_masked(
-                model, batch_inputs, batch_targets, batch_mask, optimizer, criterion, has_memory
-            )
+        train_ppl_history.append(train_ppl)
+        val_ppl_history.append(val_ppl)
 
-        # Evaluate
-        if (epoch + 1) % eval_interval == 0 or epoch == 0 or epoch == epochs - 1:
-            eval_loss, eval_acc = evaluate_recall(
-                model, eval_inputs, eval_targets, eval_mask, criterion, has_memory
-            )
-            loss_history.append(eval_loss)
-            recall_accuracy_history.append(eval_acc)
-            print(f"  Epoch {epoch + 1}: Loss={eval_loss:.4f}, Recall={eval_acc:.2%}")
+        improved = val_ppl < best_val_ppl
+        if improved:
+            best_val_ppl = val_ppl
+            best_epoch = epoch + 1
+            best_model_state = copy.deepcopy(model.state_dict())
+            epochs_without_improvement = 0
+            marker = " *"
+        else:
+            epochs_without_improvement += 1
+            marker = ""
 
-    final_loss, final_accuracy = evaluate_recall(
-        model, eval_inputs, eval_targets, eval_mask, criterion, has_memory
-    )
+        print(f"  Epoch {epoch + 1}: Train PPL={train_ppl:.2f}, Val PPL={val_ppl:.2f}{marker}")
 
-    return TrainingResult(
+        # Early stopping
+        if epochs_without_improvement >= patience:
+            print(f"  Early stopping at epoch {epoch + 1} (no improvement for {patience} epochs)")
+            break
+
+    # Restore best model
+    if best_model_state is not None:
+        model.load_state_dict(best_model_state)
+
+    result = TrainingResult(
         name=name,
         num_params=num_params,
-        final_loss=final_loss,
-        final_recall_accuracy=final_accuracy,
-        loss_history=loss_history,
-        recall_accuracy_history=recall_accuracy_history,
+        best_val_ppl=best_val_ppl,
+        best_epoch=best_epoch,
+        train_ppl_history=train_ppl_history,
+        val_ppl_history=val_ppl_history,
     )
 
+    return result, model
 
-def print_example_data(
-    inputs: torch.Tensor,
-    targets: torch.Tensor,
-    query_mask: torch.Tensor,
-    num_keys: int,
-    num_examples: int,
+
+def analyze_context_dependency(
+    model: nn.Module,
+    data: torch.Tensor,
+    seq_len: int,
+    has_memory: bool,
+    name: str,
+) -> ContextDependencyResult:
+    """Analyze how well model uses context at different distances.
+
+    We measure accuracy at different positions within a sequence:
+    - Position 0-4: Short-range dependency (1-5 tokens of context)
+    - Position 5-19: Medium-range dependency (6-20 tokens of context)
+    - Position 20+: Long-range dependency (20+ tokens of context)
+    """
+    model.eval()
+
+    # Track correct predictions by position range
+    ranges = {
+        "short (1-5)": (0, 5),
+        "medium (6-20)": (5, 20),
+        "long (20+)": (20, seq_len),
+    }
+
+    correct_by_range: dict[str, int] = {k: 0 for k in ranges}
+    total_by_range: dict[str, int] = {k: 0 for k in ranges}
+
+    if has_memory:
+        model.reset_memory()  # type: ignore
+
+    with torch.no_grad():
+        for i in range(0, min(data.size(0) - 1, seq_len * 100), seq_len):
+            inputs, targets = get_batch(data, i, seq_len)
+
+            if has_memory:
+                model.reset_memory()  # type: ignore
+
+            logits = model(inputs)
+            predictions = logits.argmax(dim=-1)
+
+            # Analyze by position
+            for range_name, (start, end) in ranges.items():
+                actual_end = min(end, inputs.size(1))
+                if start >= actual_end:
+                    continue
+
+                pred_slice = predictions[:, start:actual_end]
+                target_slice = targets[:, start:actual_end]
+
+                correct = (pred_slice == target_slice).sum().item()
+                total = target_slice.numel()
+
+                correct_by_range[range_name] += correct
+                total_by_range[range_name] += total
+
+    accuracies = {
+        k: correct_by_range[k] / total_by_range[k] if total_by_range[k] > 0 else 0.0
+        for k in ranges
+    }
+
+    return ContextDependencyResult(name=name, distance_accuracies=accuracies)
+
+
+def print_results(
+    results: list[TrainingResult],
+    context_results: list[ContextDependencyResult],
 ) -> None:
-    """Print example data samples for understanding."""
+    """Print comparison results."""
     print("\n" + "=" * 70)
-    print("EXAMPLE DATA SAMPLES")
+    print("FINAL RESULTS - WikiText-2")
     print("=" * 70)
-    print(f"Vocabulary: Keys=1-{num_keys}, Values={num_keys + 1}-{2 * num_keys}, SEP=0, ?={2 * num_keys + 1}")
-    print("-" * 70)
 
-    for i in range(min(num_examples, len(inputs))):
-        inp = inputs[i].tolist()
-        tgt = targets[i].tolist()
-        mask = query_mask[i].tolist()
-
-        print(f"\nSample {i + 1}:")
-        print(f"  Input:  {inp}")
-
-        # Find query positions and show expected answers
-        query_positions = [j for j, m in enumerate(mask) if m]
-        print(f"  Query positions: {query_positions}")
-        print(f"  Expected answers: {[tgt[j] for j in query_positions]}")
-
-
-def print_comparison(results: list[TrainingResult]) -> None:
-    """Print comparison table."""
-    print("\n" + "=" * 70)
-    print("COMPARISON RESULTS - ASSOCIATIVE RECALL TASK")
-    print("=" * 70)
-    print("\nTask: Remember [Key, Value] pairs and recall Value when given Key")
-    print("-" * 70)
-
-    print(f"\n{'Model':<30} {'Params':>12} {'Loss':>10} {'Recall Acc':>12}")
+    print(f"\n{'Model':<30} {'Params':>12} {'Best Val PPL':>14} {'Best Epoch':>12}")
     print("-" * 70)
 
     for r in results:
-        print(f"{r.name:<30} {r.num_params:>12,} {r.final_loss:>10.4f} {r.final_recall_accuracy:>12.2%}")
+        print(f"{r.name:<30} {r.num_params:>12,} {r.best_val_ppl:>14.2f} {r.best_epoch:>12}")
 
     print("-" * 70)
 
-    # Find best model
-    best_acc = max(results, key=lambda r: r.final_recall_accuracy)
-    best_loss = min(results, key=lambda r: r.final_loss)
+    # Best model
+    best = min(results, key=lambda r: r.best_val_ppl)
+    print(f"\nBest model: {best.name} (Val PPL={best.best_val_ppl:.2f})")
 
-    print(f"\nBest recall accuracy: {best_acc.name} ({best_acc.final_recall_accuracy:.2%})")
-    print(f"Best loss: {best_loss.name} ({best_loss.final_loss:.4f})")
-
-    # Print training curves
+    # Training curves
     print("\n" + "-" * 70)
-    print("TRAINING CURVES (Recall Accuracy)")
+    print("TRAINING CURVES (Val PPL)")
     print("-" * 70)
 
-    max_points = max(len(r.recall_accuracy_history) for r in results)
-    header = f"{'Epoch':<10}"
+    max_epochs = max(len(r.val_ppl_history) for r in results)
+    header = f"{'Epoch':<8}"
     for r in results:
-        header += f" {r.name[:15]:<15}"
+        header += f" {r.name[:18]:<18}"
     print(header)
 
-    for i in range(max_points):
-        row = f"{i + 1:<10}"
+    for i in range(min(max_epochs, 20)):  # Show first 20 epochs
+        row = f"{i + 1:<8}"
         for r in results:
-            if i < len(r.recall_accuracy_history):
-                row += f" {r.recall_accuracy_history[i]:<15.2%}"
+            if i < len(r.val_ppl_history):
+                row += f" {r.val_ppl_history[i]:<18.2f}"
             else:
-                row += f" {'-':<15}"
+                row += f" {'-':<18}"
         print(row)
 
-    # Interpretation
+    if max_epochs > 20:
+        print(f"  ... ({max_epochs - 20} more epochs)")
+
+    # Context dependency
     print("\n" + "-" * 70)
-    print("INTERPRETATION")
+    print("CONTEXT DEPENDENCY ANALYSIS")
     print("-" * 70)
-    print("This task tests associative memory:")
-    print("  - Model sees [K1, V1, K2, V2, ...] then queries [Q1, ?, Q2, ?]")
-    print("  - Must recall the correct Value for each Query Key")
-    print("  - Random baseline: 1/num_keys accuracy")
-    print("  - TensorMemoryLM should excel at this memory retrieval task")
+    print("Accuracy at different context distances:")
+    print("(Higher = better at using that amount of context)\n")
+
+    header = f"{'Model':<25}"
+    for range_name in context_results[0].distance_accuracies.keys():
+        header += f" {range_name:>15}"
+    print(header)
+    print("-" * 70)
+
+    for cr in context_results:
+        row = f"{cr.name:<25}"
+        for acc in cr.distance_accuracies.values():
+            row += f" {acc:>15.2%}"
+        print(row)
+
+    print("-" * 70)
+    print("\nInterpretation:")
+    print("  - short (1-5): Accuracy using only 1-5 tokens of prior context")
+    print("  - medium (6-20): Accuracy using 6-20 tokens of prior context")
+    print("  - long (20+): Accuracy using 20+ tokens of prior context")
+    print("  - Improvement from short→long shows context utilization ability")
 
 
 def main() -> None:
-    """Main comparison function."""
-    parser = argparse.ArgumentParser(
-        description="Compare TensorMemoryLM vs StandardTransformerLM on Associative Recall"
-    )
-    parser.add_argument("--epochs", type=int, default=50, help="Number of training epochs")
+    """Main function."""
+    parser = argparse.ArgumentParser(description="Compare models on WikiText-2")
+    parser.add_argument("--max-epochs", type=int, default=50, help="Maximum epochs")
+    parser.add_argument("--patience", type=int, default=3, help="Early stopping patience")
+    parser.add_argument("--seq-len", type=int, default=64, help="Sequence length")
     parser.add_argument("--batch-size", type=int, default=32, help="Batch size")
-    parser.add_argument("--num-keys", type=int, default=16, help="Number of unique keys")
-    parser.add_argument("--num-pairs", type=int, default=8, help="Number of KV pairs per sample")
-    parser.add_argument("--num-queries", type=int, default=4, help="Number of queries per sample")
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
-    parser.add_argument("--device", type=str, default="cpu", help="Device (cpu or cuda)")
-    parser.add_argument("--num-train", type=int, default=512, help="Number of training samples")
-    parser.add_argument("--num-eval", type=int, default=128, help="Number of evaluation samples")
+    parser.add_argument("--clip", type=float, default=0.5, help="Gradient clipping")
+    parser.add_argument("--device", type=str, default="cpu", help="Device")
     parser.add_argument("--d-model", type=int, default=256, help="Model dimension")
-    parser.add_argument("--num-heads", type=int, default=4, help="Number of attention heads")
+    parser.add_argument("--num-heads", type=int, default=4, help="Number of heads")
     parser.add_argument("--num-layers", type=int, default=4, help="Number of layers")
-    parser.add_argument("--d-ff", type=int, default=1024, help="Feed-forward dimension")
-    parser.add_argument("--eval-interval", type=int, default=5, help="Evaluation interval")
+    parser.add_argument("--d-ff", type=int, default=1024, help="FFN dimension")
+    parser.add_argument("--vocab-size", type=int, default=10000, help="Vocabulary size")
     args = parser.parse_args()
 
     device = torch.device(args.device)
     print(f"Device: {device}")
-    print(
-        f"Architecture: d_model={args.d_model}, heads={args.num_heads}, "
-        f"layers={args.num_layers}, d_ff={args.d_ff}"
-    )
+    print(f"Architecture: d_model={args.d_model}, heads={args.num_heads}, "
+          f"layers={args.num_layers}, d_ff={args.d_ff}")
+    print(f"Training: max_epochs={args.max_epochs}, patience={args.patience}, "
+          f"seq_len={args.seq_len}, batch_size={args.batch_size}")
 
-    # Vocabulary size: 0 (SEP) + num_keys (keys) + num_keys (values) + 1 (?)
-    vocab_size = 2 * args.num_keys + 2
-    seq_length = args.num_pairs * 2 + 1 + args.num_queries * 2  # KV pairs + SEP + queries
+    # Load WikiText-2
+    train_text, val_text, _ = download_wikitext2()
 
-    print(f"\nTask: Associative Recall")
-    print(f"  Keys: 1-{args.num_keys}, Values: {args.num_keys + 1}-{2 * args.num_keys}")
-    print(f"  Pairs per sample: {args.num_pairs}, Queries per sample: {args.num_queries}")
-    print(f"  Sequence length: {seq_length}, Vocabulary size: {vocab_size}")
-    print(f"  Random baseline: {1 / args.num_keys:.2%}")
+    # Build vocabulary
+    print("\nBuilding vocabulary...")
+    vocab, inv_vocab = build_vocab(train_text, args.vocab_size)
+    actual_vocab_size = len(vocab)
+    print(f"Vocabulary size: {actual_vocab_size}")
 
-    # Create datasets
-    print("\nCreating datasets...")
-    train_inputs, train_targets, train_mask = create_associative_recall_dataset(
-        num_keys=args.num_keys,
-        num_samples=args.num_train,
-        num_pairs=args.num_pairs,
-        num_queries=args.num_queries,
-    )
-    eval_inputs, eval_targets, eval_mask = create_associative_recall_dataset(
-        num_keys=args.num_keys,
-        num_samples=args.num_eval,
-        num_pairs=args.num_pairs,
-        num_queries=args.num_queries,
-    )
+    # Tokenize
+    print("Tokenizing...")
+    train_tokens = tokenize(train_text, vocab)
+    val_tokens = tokenize(val_text, vocab)
+    print(f"Train tokens: {len(train_tokens):,}, Val tokens: {len(val_tokens):,}")
 
-    train_inputs = train_inputs.to(device)
-    train_targets = train_targets.to(device)
-    train_mask = train_mask.to(device)
-    eval_inputs = eval_inputs.to(device)
-    eval_targets = eval_targets.to(device)
-    eval_mask = eval_mask.to(device)
-
-    print(f"Train: {len(train_inputs)}, Eval: {len(eval_inputs)}")
-
-    # Print example data
-    print_example_data(train_inputs, train_targets, train_mask, args.num_keys, num_examples=2)
+    # Batchify
+    train_data = batchify(train_tokens, args.batch_size, device)
+    val_data = batchify(val_tokens, args.batch_size, device)
+    print(f"Train batches: {train_data.size(0)}, Val batches: {val_data.size(0)}")
 
     results: list[TrainingResult] = []
+    context_results: list[ContextDependencyResult] = []
 
     # Train TensorMemoryLM
     print("\n" + "=" * 70)
@@ -371,31 +484,33 @@ def main() -> None:
     print("=" * 70)
 
     tensor_model = create_tensor_memory_model(
-        vocab_size=vocab_size,
+        vocab_size=actual_vocab_size,
         d_model=args.d_model,
         num_heads=args.num_heads,
         num_layers=args.num_layers,
         d_ff=args.d_ff,
     ).to(device)
 
-    print(f"Parameters: {count_parameters(tensor_model):,}")
+    print(f"Parameters: {sum(p.numel() for p in tensor_model.parameters()):,}")
 
-    tensor_result = train_model(
+    tensor_result, tensor_model = train_model(
         model=tensor_model,
         name="TensorMemoryLM (NoPE)",
-        train_inputs=train_inputs,
-        train_targets=train_targets,
-        train_mask=train_mask,
-        eval_inputs=eval_inputs,
-        eval_targets=eval_targets,
-        eval_mask=eval_mask,
-        epochs=args.epochs,
-        batch_size=args.batch_size,
+        train_data=train_data,
+        val_data=val_data,
+        max_epochs=args.max_epochs,
+        seq_len=args.seq_len,
         lr=args.lr,
+        clip=args.clip,
+        patience=args.patience,
         has_memory=True,
-        eval_interval=args.eval_interval,
     )
     results.append(tensor_result)
+
+    tensor_context = analyze_context_dependency(
+        tensor_model, val_data, args.seq_len, has_memory=True, name="TensorMemoryLM"
+    )
+    context_results.append(tensor_context)
 
     # Train StandardTransformerLM
     print("\n" + "=" * 70)
@@ -403,35 +518,37 @@ def main() -> None:
     print("=" * 70)
 
     standard_model = create_standard_model(
-        vocab_size=vocab_size,
+        vocab_size=actual_vocab_size,
         d_model=args.d_model,
         num_heads=args.num_heads,
         num_layers=args.num_layers,
         d_ff=args.d_ff,
-        max_len=seq_length,
+        max_len=args.seq_len,
     ).to(device)
 
-    print(f"Parameters: {count_parameters(standard_model):,}")
+    print(f"Parameters: {sum(p.numel() for p in standard_model.parameters()):,}")
 
-    standard_result = train_model(
+    standard_result, standard_model = train_model(
         model=standard_model,
         name="StandardTransformerLM (PE)",
-        train_inputs=train_inputs,
-        train_targets=train_targets,
-        train_mask=train_mask,
-        eval_inputs=eval_inputs,
-        eval_targets=eval_targets,
-        eval_mask=eval_mask,
-        epochs=args.epochs,
-        batch_size=args.batch_size,
+        train_data=train_data,
+        val_data=val_data,
+        max_epochs=args.max_epochs,
+        seq_len=args.seq_len,
         lr=args.lr,
+        clip=args.clip,
+        patience=args.patience,
         has_memory=False,
-        eval_interval=args.eval_interval,
     )
     results.append(standard_result)
 
-    # Print comparison
-    print_comparison(results)
+    standard_context = analyze_context_dependency(
+        standard_model, val_data, args.seq_len, has_memory=False, name="StandardTransformerLM"
+    )
+    context_results.append(standard_context)
+
+    # Print results
+    print_results(results, context_results)
 
 
 if __name__ == "__main__":

@@ -283,6 +283,45 @@ class TestMultiHeadMemory:
             # due to ELU+1 on zeros = 1
             pass  # This is expected behavior
 
+    def test_custom_memory_class(self):
+        """Test using DecayingTensorMemory with MultiHeadMemory."""
+        mh = MultiHeadMemory(
+            num_heads=4,
+            head_dim=32,
+            memory_class=DecayingTensorMemory,
+            decay=0.9,
+        )
+        mh.reset()
+
+        # All memories should be DecayingTensorMemory
+        for m in mh.memories:
+            assert isinstance(m, DecayingTensorMemory)
+            assert m.decay == 0.9
+
+        # Should work normally
+        keys = torch.randn(2, 4, 10, 32)
+        values = torch.randn(2, 4, 10, 32)
+        mh.update(keys, values)
+
+        queries = torch.randn(2, 4, 5, 32)
+        output = mh.retrieve(queries)
+
+        assert output.shape == (2, 4, 5, 32)
+        assert not torch.isnan(output).any()
+
+    def test_memory_kwargs_passed(self):
+        """Test that memory_kwargs are passed to memory instances."""
+        mh = MultiHeadMemory(
+            num_heads=2,
+            head_dim=16,
+            eps=1e-8,
+            use_delta_rule=True,
+        )
+
+        for m in mh.memories:
+            assert m.eps == 1e-8
+            assert m.use_delta_rule is True
+
 
 class TestTensorMemoryIntegration:
     """Integration tests for TensorMemory."""

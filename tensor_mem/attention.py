@@ -16,6 +16,8 @@ class LinearMemoryAttention(nn.Module):
     A simple multi-head attention layer that uses ONLY tensor product memory.
     No local attention, no GQA - just straightforward memory-based retrieval.
 
+    Uses Dependency Injection - receives a pre-configured MultiHeadMemory instance.
+
     Design:
         1. Project input to Q, K, V
         2. (Optional) L2 normalize Q, K, V for numerical stability
@@ -25,20 +27,27 @@ class LinearMemoryAttention(nn.Module):
         6. Merge heads and project output
 
     Args:
+        memory: Pre-configured MultiHeadMemory instance.
         hidden_size: Hidden dimension of the model.
-        num_heads: Number of attention heads.
-        head_dim: Dimension per head. If None, computed as hidden_size // num_heads.
-        eps: Small constant for numerical stability.
         bias: Whether to use bias in projections.
-        use_delta_rule: Whether to use Delta Rule for memory updates.
         normalize_qkv: Whether to L2 normalize Q, K, V after projection.
             Recommended for fp16 training to prevent overflow.
 
-    Raises:
-        ValueError: If head_dim is None and hidden_size is not divisible by num_heads.
-
     Example:
-        >>> attn = LinearMemoryAttention(hidden_size=512, num_heads=8)
+        >>> from tensor_mem import TensorMemory, MultiHeadMemory
+        >>>
+        >>> # 1. Create memory instances
+        >>> memories = [TensorMemory(dim=64, eps=1e-6) for _ in range(8)]
+        >>>
+        >>> # 2. Create MultiHeadMemory
+        >>> mh_memory = MultiHeadMemory(memories)
+        >>>
+        >>> # 3. Inject into LinearMemoryAttention
+        >>> attn = LinearMemoryAttention(
+        ...     memory=mh_memory,
+        ...     hidden_size=512,
+        ... )
+        >>>
         >>> x = torch.randn(2, 128, 512)
         >>> output = attn(x)
         >>> attn.reset_memory()  # For new sequence
@@ -46,30 +55,19 @@ class LinearMemoryAttention(nn.Module):
 
     def __init__(
         self,
+        memory: MultiHeadMemory,
         hidden_size: int,
-        num_heads: int,
-        head_dim: int | None = None,
-        eps: float = 1e-6,
         bias: bool = True,
-        use_delta_rule: bool = False,
         normalize_qkv: bool = False,
     ) -> None:
         """Initialize LinearMemoryAttention."""
         super().__init__()
 
         self.hidden_size = hidden_size
-        self.num_heads = num_heads
+        self.memory = memory
+        self.num_heads = memory.num_heads
+        self.head_dim = memory.head_dim
         self.normalize_qkv = normalize_qkv
-
-        if head_dim is None:
-            if hidden_size % num_heads != 0:
-                raise ValueError(
-                    f"hidden_size ({hidden_size}) must be divisible by "
-                    f"num_heads ({num_heads}) when head_dim is not specified"
-                )
-            self.head_dim = hidden_size // num_heads
-        else:
-            self.head_dim = head_dim
 
         proj_dim = self.num_heads * self.head_dim
 
@@ -77,13 +75,6 @@ class LinearMemoryAttention(nn.Module):
         self.k_proj = nn.Linear(hidden_size, proj_dim, bias=bias)
         self.v_proj = nn.Linear(hidden_size, proj_dim, bias=bias)
         self.o_proj = nn.Linear(proj_dim, hidden_size, bias=False)
-
-        self.memory = MultiHeadMemory(
-            num_heads=self.num_heads,
-            head_dim=self.head_dim,
-            eps=eps,
-            use_delta_rule=use_delta_rule,
-        )
 
     def reset_memory(
         self,

@@ -229,18 +229,25 @@ class TestTensorMemoryRetrieve:
 
 
 class TestMultiHeadMemory:
-    """Tests for MultiHeadMemory class."""
+    """Tests for MultiHeadMemory class (Dependency Injection pattern)."""
 
     def test_basic_init(self):
-        """Test basic initialization."""
-        mh = MultiHeadMemory(num_heads=8, head_dim=64)
+        """Test basic initialization with injected memories."""
+        memories = [TensorMemory(dim=64) for _ in range(8)]
+        mh = MultiHeadMemory(memories)
         assert mh.num_heads == 8
         assert mh.head_dim == 64
         assert len(mh.memories) == 8
 
+    def test_empty_list_raises(self):
+        """Empty memories list should raise error."""
+        with pytest.raises(ValueError, match="cannot be empty"):
+            MultiHeadMemory([])
+
     def test_reset(self):
         """Test reset all memories."""
-        mh = MultiHeadMemory(num_heads=4, head_dim=32)
+        memories = [TensorMemory(dim=32) for _ in range(4)]
+        mh = MultiHeadMemory(memories)
         mh.reset()
 
         assert mh.is_initialized
@@ -250,7 +257,8 @@ class TestMultiHeadMemory:
 
     def test_update_and_retrieve(self):
         """Test update and retrieve with multi-head."""
-        mh = MultiHeadMemory(num_heads=4, head_dim=32)
+        memories = [TensorMemory(dim=32) for _ in range(4)]
+        mh = MultiHeadMemory(memories)
         mh.reset()
 
         # [batch, num_heads, seq, head_dim]
@@ -266,7 +274,8 @@ class TestMultiHeadMemory:
 
     def test_heads_are_independent(self):
         """Each head should have independent memory."""
-        mh = MultiHeadMemory(num_heads=4, head_dim=32)
+        memories = [TensorMemory(dim=32) for _ in range(4)]
+        mh = MultiHeadMemory(memories)
         mh.reset()
 
         # Update only head 0
@@ -285,12 +294,9 @@ class TestMultiHeadMemory:
 
     def test_custom_memory_class(self):
         """Test using DecayingTensorMemory with MultiHeadMemory."""
-        mh = MultiHeadMemory(
-            num_heads=4,
-            head_dim=32,
-            memory_class=DecayingTensorMemory,
-            decay=0.9,
-        )
+        # Create DecayingTensorMemory instances with DI pattern
+        memories = [DecayingTensorMemory(dim=32, decay=0.9) for _ in range(4)]
+        mh = MultiHeadMemory(memories)
         mh.reset()
 
         # All memories should be DecayingTensorMemory
@@ -309,14 +315,11 @@ class TestMultiHeadMemory:
         assert output.shape == (2, 4, 5, 32)
         assert not torch.isnan(output).any()
 
-    def test_memory_kwargs_passed(self):
-        """Test that memory_kwargs are passed to memory instances."""
-        mh = MultiHeadMemory(
-            num_heads=2,
-            head_dim=16,
-            eps=1e-8,
-            use_delta_rule=True,
-        )
+    def test_memory_config_via_injection(self):
+        """Test that memory config is set via injection."""
+        # Create memories with specific config
+        memories = [TensorMemory(dim=16, eps=1e-8, use_delta_rule=True) for _ in range(2)]
+        mh = MultiHeadMemory(memories)
 
         for m in mh.memories:
             assert m.eps == 1e-8

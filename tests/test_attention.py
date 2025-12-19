@@ -1,9 +1,32 @@
-"""Tests for LinearMemoryAttention class."""
+"""Tests for LinearMemoryAttention class (Dependency Injection pattern)."""
 
 import pytest
 import torch
 
-from tensor_mem import LinearMemoryAttention
+from tensor_mem import LinearMemoryAttention, MultiHeadMemory, TensorMemory
+
+
+def create_attention(
+    hidden_size: int = 256,
+    num_heads: int = 4,
+    head_dim: int | None = None,
+    normalize_qkv: bool = False,
+    use_delta_rule: bool = False,
+    eps: float = 1e-6,
+) -> LinearMemoryAttention:
+    """Helper to create LinearMemoryAttention with DI pattern."""
+    if head_dim is None:
+        head_dim = hidden_size // num_heads
+
+    memories = [
+        TensorMemory(dim=head_dim, eps=eps, use_delta_rule=use_delta_rule) for _ in range(num_heads)
+    ]
+    mh_memory = MultiHeadMemory(memories)
+    return LinearMemoryAttention(
+        memory=mh_memory,
+        hidden_size=hidden_size,
+        normalize_qkv=normalize_qkv,
+    )
 
 
 class TestLinearMemoryAttentionInit:
@@ -11,19 +34,19 @@ class TestLinearMemoryAttentionInit:
 
     def test_basic_init(self):
         """Test basic initialization."""
-        attn = LinearMemoryAttention(hidden_size=256, num_heads=4)
+        attn = create_attention(hidden_size=256, num_heads=4)
         assert attn.hidden_size == 256
         assert attn.num_heads == 4
         assert attn.head_dim == 64  # 256 / 4
 
     def test_custom_head_dim(self):
         """Test custom head dimension."""
-        attn = LinearMemoryAttention(hidden_size=256, num_heads=4, head_dim=32)
+        attn = create_attention(hidden_size=256, num_heads=4, head_dim=32)
         assert attn.head_dim == 32
 
     def test_projection_shapes(self):
         """Check projection layer shapes."""
-        attn = LinearMemoryAttention(hidden_size=256, num_heads=4)
+        attn = create_attention(hidden_size=256, num_heads=4)
 
         assert attn.q_proj.in_features == 256
         assert attn.q_proj.out_features == 256
@@ -36,34 +59,28 @@ class TestLinearMemoryAttentionInit:
 
     def test_memory_structure(self):
         """Memory should match num_heads."""
-        attn = LinearMemoryAttention(hidden_size=256, num_heads=8)
+        attn = create_attention(hidden_size=256, num_heads=8)
         assert attn.memory.num_heads == 8
         assert len(attn.memory.memories) == 8
 
-    def test_invalid_head_dim_raises(self):
-        """Should raise error when hidden_size not divisible by num_heads."""
-        with pytest.raises(ValueError, match="must be divisible"):
-            LinearMemoryAttention(hidden_size=256, num_heads=3)
-
-    def test_custom_head_dim_bypasses_validation(self):
-        """Custom head_dim should bypass divisibility check."""
-        # This would fail without head_dim since 256 % 3 != 0
-        attn = LinearMemoryAttention(hidden_size=256, num_heads=3, head_dim=32)
+    def test_custom_head_dim_allows_any_num_heads(self):
+        """Custom head_dim allows any num_heads regardless of hidden_size."""
+        attn = create_attention(hidden_size=256, num_heads=3, head_dim=32)
         assert attn.head_dim == 32
         assert attn.num_heads == 3
 
     def test_delta_rule_init(self):
         """Test delta rule initialization."""
-        attn = LinearMemoryAttention(hidden_size=256, num_heads=4, use_delta_rule=True)
+        attn = create_attention(hidden_size=256, num_heads=4, use_delta_rule=True)
         for m in attn.memory.memories:
             assert m.use_delta_rule is True
 
     def test_normalize_qkv_init(self):
         """Test normalize_qkv initialization."""
-        attn = LinearMemoryAttention(hidden_size=256, num_heads=4, normalize_qkv=True)
+        attn = create_attention(hidden_size=256, num_heads=4, normalize_qkv=True)
         assert attn.normalize_qkv is True
 
-        attn2 = LinearMemoryAttention(hidden_size=256, num_heads=4)
+        attn2 = create_attention(hidden_size=256, num_heads=4)
         assert attn2.normalize_qkv is False
 
 
@@ -72,7 +89,7 @@ class TestLinearMemoryAttentionForward:
 
     def test_basic_forward(self):
         """Test basic forward pass."""
-        attn = LinearMemoryAttention(hidden_size=256, num_heads=4)
+        attn = create_attention(hidden_size=256, num_heads=4)
         x = torch.randn(2, 32, 256)
 
         output = attn(x)
@@ -81,16 +98,17 @@ class TestLinearMemoryAttentionForward:
 
     def test_variable_sequence_length(self):
         """Test with different sequence lengths."""
-        attn = LinearMemoryAttention(hidden_size=256, num_heads=4)
+        attn = create_attention(hidden_size=256, num_heads=4)
 
         for seq_len in [1, 16, 64, 256]:
+            attn.reset_memory()
             x = torch.randn(2, seq_len, 256)
             output = attn(x)
             assert output.shape == (2, seq_len, 256)
 
     def test_gradient_flow(self):
         """Gradients should flow through forward."""
-        attn = LinearMemoryAttention(hidden_size=256, num_heads=4)
+        attn = create_attention(hidden_size=256, num_heads=4)
         x = torch.randn(2, 32, 256, requires_grad=True)
 
         output = attn(x)
@@ -102,7 +120,7 @@ class TestLinearMemoryAttentionForward:
 
     def test_no_nan_outputs(self):
         """Output should not contain NaN values."""
-        attn = LinearMemoryAttention(hidden_size=256, num_heads=4)
+        attn = create_attention(hidden_size=256, num_heads=4)
         x = torch.randn(2, 32, 256)
 
         output = attn(x)
@@ -116,7 +134,7 @@ class TestLinearMemoryAttentionMemory:
 
     def test_memory_reset(self):
         """Test memory reset."""
-        attn = LinearMemoryAttention(hidden_size=256, num_heads=4)
+        attn = create_attention(hidden_size=256, num_heads=4)
         x = torch.randn(2, 32, 256)
 
         # First forward initializes memories
@@ -130,7 +148,7 @@ class TestLinearMemoryAttentionMemory:
 
     def test_memory_accumulates(self):
         """Memory should accumulate across forward passes."""
-        attn = LinearMemoryAttention(hidden_size=256, num_heads=4)
+        attn = create_attention(hidden_size=256, num_heads=4)
         x = torch.randn(2, 32, 256)
 
         # First forward
@@ -147,7 +165,7 @@ class TestLinearMemoryAttentionMemory:
 
     def test_reset_clears_accumulation(self):
         """Reset should clear accumulated memory."""
-        attn = LinearMemoryAttention(hidden_size=256, num_heads=4)
+        attn = create_attention(hidden_size=256, num_heads=4)
         x = torch.randn(2, 32, 256)
 
         # Forward passes
@@ -167,7 +185,7 @@ class TestLinearMemoryAttentionIntegration:
     def test_transformer_block_pattern(self):
         """Test in a typical transformer block pattern."""
         hidden_size = 256
-        attn = LinearMemoryAttention(hidden_size=hidden_size, num_heads=4)
+        attn = create_attention(hidden_size=hidden_size, num_heads=4)
         norm = torch.nn.LayerNorm(hidden_size)
 
         x = torch.randn(2, 32, hidden_size)
@@ -186,7 +204,7 @@ class TestLinearMemoryAttentionIntegration:
         num_layers = 4
 
         layers = torch.nn.ModuleList(
-            [LinearMemoryAttention(hidden_size=hidden_size, num_heads=4) for _ in range(num_layers)]
+            [create_attention(hidden_size=hidden_size, num_heads=4) for _ in range(num_layers)]
         )
 
         x = torch.randn(2, 32, hidden_size)
@@ -200,7 +218,7 @@ class TestLinearMemoryAttentionIntegration:
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
     def test_cuda_support(self):
         """Test that attention works on CUDA."""
-        attn = LinearMemoryAttention(hidden_size=256, num_heads=4).cuda()
+        attn = create_attention(hidden_size=256, num_heads=4).cuda()
         x = torch.randn(2, 32, 256, device="cuda")
 
         output = attn(x)
@@ -211,7 +229,7 @@ class TestLinearMemoryAttentionIntegration:
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
     def test_mixed_precision(self):
         """Test with mixed precision (float16)."""
-        attn = LinearMemoryAttention(hidden_size=256, num_heads=4).cuda().half()
+        attn = create_attention(hidden_size=256, num_heads=4).cuda().half()
         x = torch.randn(2, 32, 256, device="cuda", dtype=torch.float16)
 
         output = attn(x)
@@ -225,7 +243,7 @@ class TestNumericalStability:
 
     def test_normalize_qkv_forward(self):
         """Test forward with normalize_qkv enabled."""
-        attn = LinearMemoryAttention(hidden_size=256, num_heads=4, normalize_qkv=True)
+        attn = create_attention(hidden_size=256, num_heads=4, normalize_qkv=True)
         x = torch.randn(2, 32, 256)
 
         output = attn(x)
@@ -236,7 +254,7 @@ class TestNumericalStability:
 
     def test_large_values_without_normalization(self):
         """Large input values should be handled by clamping."""
-        attn = LinearMemoryAttention(hidden_size=256, num_heads=4)
+        attn = create_attention(hidden_size=256, num_heads=4)
         # Large values that could cause overflow
         x = torch.randn(2, 32, 256) * 10
 
@@ -247,7 +265,7 @@ class TestNumericalStability:
 
     def test_large_values_with_normalization(self):
         """Large input values with normalization should be stable."""
-        attn = LinearMemoryAttention(hidden_size=256, num_heads=4, normalize_qkv=True)
+        attn = create_attention(hidden_size=256, num_heads=4, normalize_qkv=True)
         x = torch.randn(2, 32, 256) * 10
 
         output = attn(x)
@@ -257,7 +275,7 @@ class TestNumericalStability:
 
     def test_many_updates_stability(self):
         """Memory should remain stable after many updates."""
-        attn = LinearMemoryAttention(hidden_size=256, num_heads=4)
+        attn = create_attention(hidden_size=256, num_heads=4)
 
         for _ in range(100):
             x = torch.randn(2, 32, 256)
@@ -274,8 +292,6 @@ class TestNumericalStability:
 
     def test_clamping_prevents_explosion(self):
         """Clamping should prevent memory explosion."""
-        from tensor_mem import TensorMemory
-
         memory = TensorMemory(dim=64, max_delta=1.0, max_memory=10.0, max_norm=100.0)
         memory.reset()
 

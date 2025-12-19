@@ -2,44 +2,37 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Sequence
 
 import torch
 import torch.nn as nn
 
 from .base import BaseTensorMemory
-from .tensor import TensorMemory
 
 
 class MultiHeadMemory(nn.Module):
     """
     Multi-head wrapper for TensorMemory.
 
-    Creates multiple independent memory instances, one per head.
-    This is a convenience wrapper for multi-head attention patterns.
+    Wraps multiple independent memory instances, one per head.
+    Uses Dependency Injection - receives pre-configured memory instances.
 
     Args:
-        num_heads: Number of memory heads.
-        head_dim: Dimension per head.
-        memory_class: Memory class to use (default: TensorMemory).
-            Can be TensorMemory, DecayingTensorMemory, or any BaseTensorMemory subclass.
-        **memory_kwargs: Additional arguments passed to each memory instance.
-            For TensorMemory: eps, use_delta_rule, max_delta, max_memory, max_norm
-            For DecayingTensorMemory: decay, eps, use_delta_rule, etc.
+        memories: List of pre-configured BaseTensorMemory instances.
+            All memories should have the same dimension.
 
     Example:
-        >>> # Using default TensorMemory
-        >>> mh_memory = MultiHeadMemory(num_heads=8, head_dim=64)
-        >>> mh_memory.reset(device="cuda")
+        >>> from tensor_mem import TensorMemory, DecayingTensorMemory
         >>>
-        >>> # Using DecayingTensorMemory
-        >>> from tensor_mem import DecayingTensorMemory
-        >>> mh_memory = MultiHeadMemory(
-        ...     num_heads=8,
-        ...     head_dim=64,
-        ...     memory_class=DecayingTensorMemory,
-        ...     decay=0.95,
-        ... )
+        >>> # Create memory instances with desired configuration
+        >>> memories = [
+        ...     DecayingTensorMemory(dim=64, decay=0.95, eps=1e-6)
+        ...     for _ in range(8)
+        ... ]
+        >>>
+        >>> # Inject into MultiHeadMemory
+        >>> mh_memory = MultiHeadMemory(memories)
+        >>> mh_memory.reset(device="cuda")
         >>>
         >>> # keys/values: [batch, num_heads, seq, head_dim]
         >>> keys = torch.randn(4, 8, 128, 64, device="cuda")
@@ -50,22 +43,26 @@ class MultiHeadMemory(nn.Module):
         >>> output = mh_memory.retrieve(queries)  # [4, 8, 32, 64]
     """
 
-    def __init__(
-        self,
-        num_heads: int,
-        head_dim: int,
-        memory_class: type[BaseTensorMemory] = TensorMemory,
-        **memory_kwargs: Any,
-    ) -> None:
-        """Initialize MultiHeadMemory."""
+    def __init__(self, memories: Sequence[BaseTensorMemory]) -> None:
+        """Initialize MultiHeadMemory with pre-configured memory instances."""
         super().__init__()
-        self.num_heads = num_heads
-        self.head_dim = head_dim
-        self._memory_class = memory_class
 
-        self.memories = nn.ModuleList(
-            [memory_class(dim=head_dim, **memory_kwargs) for _ in range(num_heads)]
-        )
+        if not memories:
+            raise ValueError("memories list cannot be empty")
+
+        self.memories = nn.ModuleList(memories)
+        self._num_heads = len(memories)
+        self._head_dim = memories[0].dim
+
+    @property
+    def num_heads(self) -> int:
+        """Number of memory heads."""
+        return self._num_heads
+
+    @property
+    def head_dim(self) -> int:
+        """Dimension per head."""
+        return self._head_dim
 
     @property
     def is_initialized(self) -> bool:
@@ -118,4 +115,5 @@ class MultiHeadMemory(nn.Module):
 
     def extra_repr(self) -> str:
         """Return extra representation string."""
-        return f"num_heads={self.num_heads}, head_dim={self.head_dim}, memory_class={self._memory_class.__name__}"
+        memory_type = type(self.memories[0]).__name__
+        return f"num_heads={self._num_heads}, head_dim={self._head_dim}, memory_type={memory_type}"

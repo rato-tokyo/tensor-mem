@@ -3,7 +3,8 @@
 
 This script trains both models on the same synthetic task and compares:
 - Training speed (loss convergence)
-- Final accuracy
+- Final accuracy (intra-sequence)
+- Cross-sequence memory performance (TensorMemoryLM only)
 - Parameter count
 
 Usage:
@@ -39,6 +40,16 @@ class TrainingResult:
     final_accuracy: float
     loss_history: list[float]
     accuracy_history: list[float]
+
+
+@dataclass
+class ContextAnalysis:
+    """Analysis of context understanding by position in pattern."""
+
+    name: str
+    position_accuracies: list[float]  # Accuracy at each position in pattern
+    early_accuracy: float  # Accuracy at positions 0-1 (less context)
+    late_accuracy: float  # Accuracy at positions 2+ (more context)
 
 
 def create_tensor_memory_model(
@@ -123,7 +134,100 @@ def train_model(
     )
 
 
-def print_comparison(results: list[TrainingResult]) -> None:
+def analyze_context_understanding(
+    model: nn.Module,
+    inputs: torch.Tensor,
+    targets: torch.Tensor,
+    pattern_length: int,
+    has_memory: bool,
+    name: str,
+) -> ContextAnalysis:
+    """Analyze model's understanding of context by position in pattern.
+
+    For a repeating pattern like [1,2,3,4,1,2,3,4,...]:
+    - Position 0: Predict 2 from [1] (minimal context)
+    - Position 1: Predict 3 from [1,2] (some context)
+    - Position 2: Predict 4 from [1,2,3] (more context)
+    - Position 3: Predict 1 from [1,2,3,4] (full pattern seen)
+
+    Models that understand the pattern should perform better at later positions.
+    """
+    model.eval()
+    if has_memory:
+        model.reset_memory()  # type: ignore
+
+    with torch.no_grad():
+        logits = model(inputs)
+        predictions = logits.argmax(dim=-1)
+
+        # Analyze accuracy by position in pattern
+        seq_len = inputs.size(1)
+        position_correct = [0] * pattern_length
+        position_total = [0] * pattern_length
+
+        for pos in range(seq_len):
+            pattern_pos = pos % pattern_length
+            correct = (predictions[:, pos] == targets[:, pos]).sum().item()
+            position_correct[pattern_pos] += correct
+            position_total[pattern_pos] += inputs.size(0)
+
+        position_accuracies = [
+            position_correct[i] / position_total[i] if position_total[i] > 0 else 0.0
+            for i in range(pattern_length)
+        ]
+
+        # Early (less context) vs Late (more context)
+        early_correct = sum(position_correct[:2])
+        early_total = sum(position_total[:2])
+        late_correct = sum(position_correct[2:])
+        late_total = sum(position_total[2:])
+
+        early_accuracy = early_correct / early_total if early_total > 0 else 0.0
+        late_accuracy = late_correct / late_total if late_total > 0 else 0.0
+
+    return ContextAnalysis(
+        name=name,
+        position_accuracies=position_accuracies,
+        early_accuracy=early_accuracy,
+        late_accuracy=late_accuracy,
+    )
+
+
+def print_context_analysis(analyses: list[ContextAnalysis], pattern_length: int) -> None:
+    """Print context understanding analysis."""
+    print("\n" + "=" * 70)
+    print("CONTEXT UNDERSTANDING ANALYSIS")
+    print("=" * 70)
+    print("\nAccuracy by position in pattern (0 = least context, 3 = most context):")
+    print("-" * 70)
+
+    # Header
+    header = f"{'Model':<25}"
+    for i in range(pattern_length):
+        header += f" {'Pos ' + str(i):>8}"
+    header += f" {'Early':>10} {'Late':>10} {'Δ':>8}"
+    print(header)
+    print("-" * 70)
+
+    for a in analyses:
+        row = f"{a.name:<25}"
+        for acc in a.position_accuracies:
+            row += f" {acc:>8.1%}"
+        delta = a.late_accuracy - a.early_accuracy
+        row += f" {a.early_accuracy:>10.1%} {a.late_accuracy:>10.1%} {delta:>+8.1%}"
+        print(row)
+
+    print("-" * 70)
+    print("\nInterpretation:")
+    print("  - Early (Pos 0-1): Predictions with less context available")
+    print("  - Late (Pos 2+): Predictions with more context available")
+    print("  - Δ (Delta): Improvement from having more context")
+    print("  - Higher Δ = Better at using context information")
+
+
+def print_comparison(
+    results: list[TrainingResult], analyses: list[ContextAnalysis], pattern_length: int
+) -> None:
     """Print comparison table."""
     print("\n" + "=" * 70)
     print("COMPARISON RESULTS")
@@ -163,6 +267,9 @@ def print_comparison(results: list[TrainingResult]) -> None:
             else:
                 row += f" {'-':<15}"
         print(row)
+
+    # Print context analysis
+    print_context_analysis(analyses, pattern_length)
 
 
 def main() -> None:
@@ -278,8 +385,35 @@ def main() -> None:
     results.append(standard_result)
     print(f"Final: Loss={standard_result.final_loss:.4f}, Acc={standard_result.final_accuracy:.2%}")
 
+    # Context understanding analysis
+    print("\n" + "=" * 70)
+    print("Analyzing context understanding...")
+    print("=" * 70)
+
+    analyses: list[ContextAnalysis] = []
+
+    tensor_analysis = analyze_context_understanding(
+        model=tensor_model,
+        inputs=eval_inputs,
+        targets=eval_targets,
+        pattern_length=args.pattern_length,
+        has_memory=True,
+        name="TensorMemoryLM",
+    )
+    analyses.append(tensor_analysis)
+
+    standard_analysis = analyze_context_understanding(
+        model=standard_model,
+        inputs=eval_inputs,
+        targets=eval_targets,
+        pattern_length=args.pattern_length,
+        has_memory=False,
+        name="StandardTransformerLM",
+    )
+    analyses.append(standard_analysis)
+
     # Print comparison
-    print_comparison(results)
+    print_comparison(results, analyses, args.pattern_length)
 
 
 if __name__ == "__main__":

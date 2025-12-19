@@ -60,6 +60,97 @@ def create_synthetic_dataset(
     return torch.stack(inputs), torch.stack(targets)
 
 
+def create_associative_recall_dataset(
+    num_keys: int,
+    num_samples: int,
+    num_pairs: int,
+    num_queries: int,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Create associative recall dataset.
+
+    Task: Remember key-value pairs and recall the value when given the key.
+
+    Sequence structure:
+        [K1, V1, K2, V2, ..., Kn, Vn, SEP, Q1, ?, Q2, ?, ...]
+
+    Where:
+        - Ki: Key token (from key vocabulary 1 to num_keys)
+        - Vi: Value token (from value vocabulary num_keys+1 to 2*num_keys)
+        - SEP: Separator token (0)
+        - Qi: Query key (one of the keys seen before)
+        - ?: Position where model should predict the corresponding value
+
+    Example (num_keys=10, num_pairs=3, num_queries=2):
+        Keys: 1-10, Values: 11-20, SEP: 0
+        Input:  [3, 15, 7, 12, 1, 18, 0, 3, ?, 7, ?]
+        Target: [*, *, *, *, *, *, *, *, 15, *, 12]
+        (* = don't care, only query positions matter)
+
+    Args:
+        num_keys: Number of unique keys (vocabulary = 2*num_keys + 1).
+        num_samples: Number of training samples.
+        num_pairs: Number of key-value pairs per sample.
+        num_queries: Number of queries per sample.
+
+    Returns:
+        Tuple of (inputs, targets, query_mask) tensors.
+        - inputs: [num_samples, seq_length]
+        - targets: [num_samples, seq_length]
+        - query_mask: [num_samples, seq_length] boolean mask for query positions
+    """
+    # Vocabulary layout:
+    # 0: SEP token
+    # 1 to num_keys: Key tokens
+    # num_keys+1 to 2*num_keys: Value tokens
+
+    sep_token = 0
+    query_placeholder = 2 * num_keys + 1  # Extra token for ? placeholder
+
+    inputs = []
+    targets = []
+    query_masks = []
+
+    for _ in range(num_samples):
+        # Generate random key-value pairs (unique keys)
+        keys = torch.randperm(num_keys)[:num_pairs] + 1  # Keys: 1 to num_keys
+        values = torch.randint(1, num_keys + 1, (num_pairs,)) + num_keys  # Values: num_keys+1 to 2*num_keys
+
+        # Build KV section: [K1, V1, K2, V2, ...]
+        kv_section = torch.zeros(num_pairs * 2, dtype=torch.long)
+        kv_section[0::2] = keys
+        kv_section[1::2] = values
+
+        # Select random queries from the keys
+        query_indices = torch.randint(0, num_pairs, (num_queries,))
+        query_keys = keys[query_indices]
+        query_values = values[query_indices]
+
+        # Build query section: [Q1, ?, Q2, ?, ...]
+        query_section = torch.zeros(num_queries * 2, dtype=torch.long)
+        query_section[0::2] = query_keys
+        query_section[1::2] = query_placeholder
+
+        # Full sequence: [KV..., SEP, Queries...]
+        seq = torch.cat([kv_section, torch.tensor([sep_token]), query_section])
+
+        # Build target (only care about positions after query keys)
+        target = torch.zeros_like(seq)
+        # For next-token prediction: target[i] = what should come after input[i]
+        # After a query key, the next token should be the corresponding value
+        query_answer_positions = len(kv_section) + 1 + torch.arange(num_queries) * 2
+        target[query_answer_positions] = query_values
+
+        # Query mask: True at positions where we evaluate
+        mask = torch.zeros(len(seq), dtype=torch.bool)
+        mask[query_answer_positions] = True
+
+        inputs.append(seq)
+        targets.append(target)
+        query_masks.append(mask)
+
+    return torch.stack(inputs), torch.stack(targets), torch.stack(query_masks)
+
+
 def train_step(
     model: LMModel,
     inputs: torch.Tensor,

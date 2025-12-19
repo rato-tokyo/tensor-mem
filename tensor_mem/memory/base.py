@@ -111,6 +111,76 @@ class BaseTensorMemory(nn.Module, ABC):
             values: Value tensor of shape [batch, seq, dim].
         """
 
+    def _retrieve_from_memory(self, sigma: torch.Tensor) -> torch.Tensor:
+        """
+        Core memory retrieval using activated queries/keys.
+
+        This is the fundamental retrieval operation shared by both
+        retrieve() and _compute_delta_values().
+
+        Args:
+            sigma: Activated tensor σ(Q) or σ(K) of shape [batch, seq, dim].
+
+        Returns:
+            Retrieved values of shape [batch, seq, dim].
+        """
+        # (σ @ M)
+        retrieved = torch.matmul(sigma, self.M)
+
+        # σ @ z
+        norm = torch.matmul(sigma, self.z)
+
+        # Normalize
+        return retrieved / (norm.unsqueeze(-1) + self.eps)
+
+    def _compute_update_matrices(
+        self,
+        keys: torch.Tensor,
+        values: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Compute update matrices for memory update.
+
+        This is the common computation shared by TensorMemory and
+        DecayingTensorMemory update methods.
+
+        Args:
+            keys: Key tensor of shape [batch, seq, dim].
+            values: Value tensor of shape [batch, seq, dim].
+
+        Returns:
+            Tuple of (sigma_k, delta_m, delta_z):
+                - sigma_k: Activated keys σ(K)
+                - delta_m: Memory matrix update
+                - delta_z: Normalization vector update
+        """
+        batch, seq, _ = keys.shape
+
+        sigma_k = elu_plus_one(keys)
+        update_values = self._compute_delta_values(sigma_k, values)
+
+        # M update: σ(K)^T @ V / (batch * seq)
+        delta_m = torch.einsum("bsd,bse->de", sigma_k, update_values)
+        delta_m = delta_m / (batch * seq)
+
+        # Clamp delta to prevent overflow (especially in fp16)
+        delta_m = torch.clamp(delta_m, min=-self.max_delta, max=self.max_delta)
+
+        # z update: Σσ(K) / batch
+        delta_z = sigma_k.sum(dim=(0, 1)) / batch
+
+        return sigma_k, delta_m, delta_z
+
+    def _clamp_memory(self) -> None:
+        """
+        Clamp memory values to prevent numerical instability.
+
+        Ensures M stays within [-max_memory, max_memory] and
+        z stays within [eps, max_norm].
+        """
+        self.M = torch.clamp(self.M, min=-self.max_memory, max=self.max_memory)
+        self.z = torch.clamp(self.z, min=self.eps, max=self.max_norm)
+
     def retrieve(
         self,
         queries: torch.Tensor,
@@ -128,17 +198,7 @@ class BaseTensorMemory(nn.Module, ABC):
             raise RuntimeError("Memory not initialized. Call reset() first.")
 
         sigma_q = elu_plus_one(queries)
-
-        # (σ(Q) @ M)
-        retrieved = torch.matmul(sigma_q, self.M)
-
-        # σ(Q) @ z
-        norm = torch.matmul(sigma_q, self.z)
-
-        # Normalize
-        output = retrieved / (norm.unsqueeze(-1) + self.eps)
-
-        return output
+        return self._retrieve_from_memory(sigma_q)
 
     def _compute_delta_values(
         self,
@@ -156,9 +216,7 @@ class BaseTensorMemory(nn.Module, ABC):
             Values to use for update (may be adjusted by Delta Rule).
         """
         if self.use_delta_rule and not self.is_empty:
-            retrieved = torch.matmul(sigma_k, self.M)
-            norm = torch.matmul(sigma_k, self.z)
-            existing = retrieved / (norm.unsqueeze(-1) + self.eps)
+            existing = self._retrieve_from_memory(sigma_k)
             return values - existing
         return values
 
@@ -225,26 +283,13 @@ class TensorMemory(BaseTensorMemory):
         if not self.is_initialized:
             raise RuntimeError("Memory not initialized. Call reset() first.")
 
-        batch, seq, _ = keys.shape
+        _, delta_m, delta_z = self._compute_update_matrices(keys, values)
 
-        sigma_k = elu_plus_one(keys)
-        update_values = self._compute_delta_values(sigma_k, values)
+        # Accumulative update: M = M + delta_m, z = z + delta_z
+        self.M = self.M + delta_m
+        self.z = self.z + delta_z
 
-        # M = M + σ(K)^T @ V / (batch * seq)
-        delta_m = torch.einsum("bsd,bse->de", sigma_k, update_values)
-        delta_m = delta_m / (batch * seq)
-
-        # Clamp delta to prevent overflow (especially in fp16)
-        delta_m = torch.clamp(delta_m, min=-self.max_delta, max=self.max_delta)
-
-        # Update and clamp M to prevent accumulation explosion
-        self.M = torch.clamp(self.M + delta_m, min=-self.max_memory, max=self.max_memory)
-
-        # z = z + Σσ(K) / batch
-        delta_z = sigma_k.sum(dim=(0, 1)) / batch
-
-        # Clamp z to ensure valid normalization
-        self.z = torch.clamp(self.z + delta_z, min=self.eps, max=self.max_norm)
+        self._clamp_memory()
 
     def extra_repr(self) -> str:
         """Return extra representation string."""

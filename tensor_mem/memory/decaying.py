@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import torch
 
-from ..utils import elu_plus_one
 from .base import BaseTensorMemory
 
 
@@ -86,26 +85,13 @@ class DecayingTensorMemory(BaseTensorMemory):
         if not self.is_initialized:
             raise RuntimeError("Memory not initialized. Call reset() first.")
 
-        batch, seq, _ = keys.shape
+        _, delta_m, delta_z = self._compute_update_matrices(keys, values)
 
-        sigma_k = elu_plus_one(keys)
-        update_values = self._compute_delta_values(sigma_k, values)
+        # Apply exponential decay: M = decay * M + (1 - decay) * delta_m
+        self.M = self.decay * self.M + (1.0 - self.decay) * delta_m
+        self.z = self.decay * self.z + (1.0 - self.decay) * delta_z
 
-        # Compute new contribution: σ(K)^T @ V / (batch * seq)
-        new_m = torch.einsum("bsd,bse->de", sigma_k, update_values)
-        new_m = new_m / (batch * seq)
-
-        # Clamp new contribution
-        new_m = torch.clamp(new_m, min=-self.max_delta, max=self.max_delta)
-
-        # Apply exponential decay: M = decay * M + (1 - decay) * new_m
-        self.M = self.decay * self.M + (1.0 - self.decay) * new_m
-        self.M = torch.clamp(self.M, min=-self.max_memory, max=self.max_memory)
-
-        # z = decay * z + (1 - decay) * Σσ(K) / batch
-        new_z = sigma_k.sum(dim=(0, 1)) / batch
-        self.z = self.decay * self.z + (1.0 - self.decay) * new_z
-        self.z = torch.clamp(self.z, min=self.eps, max=self.max_norm)
+        self._clamp_memory()
 
     def extra_repr(self) -> str:
         """Return extra representation string."""

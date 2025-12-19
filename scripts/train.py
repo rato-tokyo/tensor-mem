@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Minimal training script for TensorMemoryLM with synthetic data.
+"""Training script for TensorMemoryLM with synthetic data.
 
 This script demonstrates basic training on a simple sequence prediction task.
 The synthetic task: predict the next token in a repeating pattern.
@@ -15,117 +15,14 @@ import argparse
 import sys
 from pathlib import Path
 
-# Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import torch
 import torch.nn as nn
 from config import default_memory_config
+from training import count_parameters, create_synthetic_dataset, evaluate, train_epoch
 
 from tensor_mem import Layer, TensorMemory, TensorMemoryLM
-
-
-def create_synthetic_dataset(
-    vocab_size: int,
-    seq_length: int,
-    num_samples: int,
-    pattern_length: int,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Create synthetic dataset with repeating patterns.
-
-    Task: Learn to predict the next token in a repeating sequence.
-    Example pattern [1, 2, 3, 4] -> input: [1, 2, 3, 4, 1, 2, 3], target: [2, 3, 4, 1, 2, 3, 4]
-
-    Args:
-        vocab_size: Size of vocabulary (tokens 0 to vocab_size-1).
-        seq_length: Length of each sequence.
-        num_samples: Number of training samples.
-        pattern_length: Length of the repeating pattern.
-
-    Returns:
-        Tuple of (inputs, targets) tensors of shape [num_samples, seq_length].
-    """
-    inputs = []
-    targets = []
-
-    for _ in range(num_samples):
-        # Create a random repeating pattern (use tokens 1 to vocab_size-1, reserve 0 for padding)
-        pattern = torch.randint(1, vocab_size, (pattern_length,))
-
-        # Repeat pattern to fill sequence
-        repeats = (seq_length + pattern_length) // pattern_length + 1
-        full_seq = pattern.repeat(repeats)[: seq_length + 1]
-
-        inputs.append(full_seq[:-1])
-        targets.append(full_seq[1:])
-
-    return torch.stack(inputs), torch.stack(targets)
-
-
-def train_step(
-    model: nn.Module,
-    inputs: torch.Tensor,
-    targets: torch.Tensor,
-    optimizer: torch.optim.Optimizer,
-    criterion: nn.Module,
-) -> float:
-    """Perform a single training step.
-
-    Args:
-        model: The model to train.
-        inputs: Input tensor [batch, seq].
-        targets: Target tensor [batch, seq].
-        optimizer: Optimizer.
-        criterion: Loss function.
-
-    Returns:
-        Loss value as float.
-    """
-    model.train()
-    optimizer.zero_grad()
-
-    # Reset memory for each batch (important for TensorMemoryLM)
-    model.reset_memory()
-
-    logits = model(inputs)  # [batch, seq, vocab]
-    loss = criterion(logits.view(-1, logits.size(-1)), targets.view(-1))
-
-    loss.backward()
-    optimizer.step()
-
-    return float(loss.item())
-
-
-def evaluate(
-    model: nn.Module,
-    inputs: torch.Tensor,
-    targets: torch.Tensor,
-    criterion: nn.Module,
-) -> tuple[float, float]:
-    """Evaluate model on dataset.
-
-    Args:
-        model: The model to evaluate.
-        inputs: Input tensor [batch, seq].
-        targets: Target tensor [batch, seq].
-        criterion: Loss function.
-
-    Returns:
-        Tuple of (loss, accuracy).
-    """
-    model.eval()
-    model.reset_memory()
-
-    with torch.no_grad():
-        logits = model(inputs)
-        loss = criterion(logits.view(-1, logits.size(-1)), targets.view(-1))
-
-        predictions = logits.argmax(dim=-1)
-        correct = (predictions == targets).sum().item()
-        total = targets.numel()
-        accuracy = correct / total
-
-    return loss.item(), accuracy
 
 
 def main() -> None:
@@ -149,7 +46,6 @@ def main() -> None:
     print("\nCreating model...")
     config = default_memory_config(dim=64)
 
-    # TensorMemoryLM: 4 layers, 4 heads, hidden=256, d_ff=1024
     model = TensorMemoryLM(
         vocab_size=args.vocab_size,
         layers=[
@@ -204,13 +100,11 @@ def main() -> None:
         ],
     ).to(device)
 
-    # Get structure info from the actual model
     num_layers = len(model.layers)
     num_heads = model.layers[0].attention.num_heads
     d_model = model.d_model
 
-    num_params = sum(p.numel() for p in model.parameters())
-    print(f"Model parameters: {num_params:,}")
+    print(f"Model parameters: {count_parameters(model):,}")
     print(f"Structure: d_model={d_model}, heads={num_heads}, layers={num_layers}")
 
     # Create datasets
@@ -245,28 +139,20 @@ def main() -> None:
     print("-" * 60)
 
     for epoch in range(args.epochs):
-        # Shuffle training data
-        perm = torch.randperm(len(train_inputs))
-        train_inputs_shuffled = train_inputs[perm]
-        train_targets_shuffled = train_targets[perm]
+        avg_train_loss = train_epoch(
+            model,
+            train_inputs,
+            train_targets,
+            optimizer,
+            criterion,
+            args.batch_size,
+            has_memory=True,
+        )
 
-        # Train on batches
-        total_loss = 0.0
-        num_batches = 0
-
-        for i in range(0, len(train_inputs), args.batch_size):
-            batch_inputs = train_inputs_shuffled[i : i + args.batch_size]
-            batch_targets = train_targets_shuffled[i : i + args.batch_size]
-
-            loss = train_step(model, batch_inputs, batch_targets, optimizer, criterion)
-            total_loss += loss
-            num_batches += 1
-
-        avg_train_loss = total_loss / num_batches
-
-        # Evaluate periodically
         if (epoch + 1) % 10 == 0 or epoch == 0:
-            eval_loss, eval_acc = evaluate(model, eval_inputs, eval_targets, criterion)
+            eval_loss, eval_acc = evaluate(
+                model, eval_inputs, eval_targets, criterion, has_memory=True
+            )
             print(
                 f"Epoch {epoch + 1:3d}/{args.epochs} | "
                 f"Train Loss: {avg_train_loss:.4f} | "
@@ -278,7 +164,7 @@ def main() -> None:
 
     # Final evaluation
     print("\nFinal evaluation:")
-    eval_loss, eval_acc = evaluate(model, eval_inputs, eval_targets, criterion)
+    eval_loss, eval_acc = evaluate(model, eval_inputs, eval_targets, criterion, has_memory=True)
     print(f"  Loss: {eval_loss:.4f}")
     print(f"  Accuracy: {eval_acc:.2%}")
 

@@ -27,15 +27,17 @@ class StandardTransformerBlock(nn.Module):
             nn.Linear(d_ff, d_model),
         )
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
-        """Forward pass with pre-norm architecture."""
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass with pre-norm architecture and causal masking."""
         normed = self.norm1(x)
+        seq_len = x.size(1)
+        causal_mask = nn.Transformer.generate_square_subsequent_mask(seq_len, device=x.device)
         attn_out, _ = self.attention(
             normed,
             normed,
             normed,
-            attn_mask=attn_mask,
-            is_causal=attn_mask is None,
+            attn_mask=causal_mask,
+            is_causal=True,
         )
         x = x + attn_out
         x = x + self.ffn(self.norm2(x))

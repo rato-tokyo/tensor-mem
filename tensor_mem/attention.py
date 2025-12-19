@@ -46,6 +46,8 @@ class LinearMemoryAttention(nn.Module):
         >>> attn = LinearMemoryAttention(
         ...     memory=mh_memory,
         ...     hidden_size=512,
+        ...     bias=True,
+        ...     normalize_qkv=False,
         ... )
         >>>
         >>> x = torch.randn(2, 128, 512)
@@ -57,8 +59,8 @@ class LinearMemoryAttention(nn.Module):
         self,
         memory: MultiHeadMemory,
         hidden_size: int,
-        bias: bool = True,
-        normalize_qkv: bool = False,
+        bias: bool,
+        normalize_qkv: bool,
     ) -> None:
         """Initialize LinearMemoryAttention."""
         super().__init__()

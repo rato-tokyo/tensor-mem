@@ -10,6 +10,7 @@ def create_attention(
     hidden_size: int = 256,
     num_heads: int = 4,
     head_dim: int | None = None,
+    bias: bool = True,
     normalize_qkv: bool = False,
     use_delta_rule: bool = False,
     eps: float = 1e-6,
@@ -25,6 +26,7 @@ def create_attention(
     return LinearMemoryAttention(
         memory=mh_memory,
         hidden_size=hidden_size,
+        bias=bias,
         normalize_qkv=normalize_qkv,
     )
 

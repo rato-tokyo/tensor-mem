@@ -71,10 +71,15 @@ memories = [
 multi_head = MultiHeadMemory(memories)
 
 # 3. Inject into LinearMemoryAttention
-attention = LinearMemoryAttention(memory=multi_head, hidden_size=512)
+attention = LinearMemoryAttention(
+    memory=multi_head,
+    hidden_size=512,
+    bias=True,
+    normalize_qkv=False,
+)
 
 # 4. Inject into TensorMemoryBlock
-block = TensorMemoryBlock(attention=attention, d_ff=2048)
+block = TensorMemoryBlock(attention=attention, d_ff=2048, dropout=0.1)
 ```
 
 ### Benefits

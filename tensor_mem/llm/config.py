@@ -93,6 +93,34 @@ class LMConfig:
         return self.attention.head_dim
 
 
+# Shared memory configurations (DRY - Don't Repeat Yourself)
+_STANDARD_MEMORY_CONFIG = MemoryConfig(
+    dim=64,
+    eps=1e-6,
+    use_delta_rule=False,
+    max_delta=10.0,
+    max_memory=100.0,
+    max_norm=1000.0,
+)
+
+_DECAYING_MEMORY_CONFIG = DecayingMemoryConfig(
+    dim=64,
+    eps=1e-6,
+    use_delta_rule=False,
+    max_delta=10.0,
+    max_memory=100.0,
+    max_norm=1000.0,
+    decay=0.95,
+)
+
+
+def _get_memory_config(memory_type: Literal["standard", "decaying"]) -> MemoryConfig | DecayingMemoryConfig:
+    """Get memory config by type."""
+    if memory_type == "standard":
+        return _STANDARD_MEMORY_CONFIG
+    return _DECAYING_MEMORY_CONFIG
+
+
 # Preset configurations for common use cases
 
 
@@ -103,31 +131,11 @@ def small_config(vocab_size: int, memory_type: Literal["standard", "decaying"]) 
         vocab_size: Vocabulary size
         memory_type: "standard" for TensorMemory, "decaying" for DecayingTensorMemory
     """
-    if memory_type == "standard":
-        memory = MemoryConfig(
-            dim=64,
-            eps=1e-6,
-            use_delta_rule=False,
-            max_delta=10.0,
-            max_memory=100.0,
-            max_norm=1000.0,
-        )
-    else:
-        memory = DecayingMemoryConfig(
-            dim=64,
-            eps=1e-6,
-            use_delta_rule=False,
-            max_delta=10.0,
-            max_memory=100.0,
-            max_norm=1000.0,
-            decay=0.95,
-        )
-
     return LMConfig(
         vocab_size=vocab_size,
         num_layers=4,
         dropout=0.1,
-        memory=memory,
+        memory=_get_memory_config(memory_type),
         attention=AttentionConfig(
             hidden_size=256,
             num_heads=4,
@@ -149,31 +157,11 @@ def medium_config(vocab_size: int, memory_type: Literal["standard", "decaying"])
         vocab_size: Vocabulary size
         memory_type: "standard" for TensorMemory, "decaying" for DecayingTensorMemory
     """
-    if memory_type == "standard":
-        memory = MemoryConfig(
-            dim=64,
-            eps=1e-6,
-            use_delta_rule=False,
-            max_delta=10.0,
-            max_memory=100.0,
-            max_norm=1000.0,
-        )
-    else:
-        memory = DecayingMemoryConfig(
-            dim=64,
-            eps=1e-6,
-            use_delta_rule=False,
-            max_delta=10.0,
-            max_memory=100.0,
-            max_norm=1000.0,
-            decay=0.95,
-        )
-
     return LMConfig(
         vocab_size=vocab_size,
         num_layers=6,
         dropout=0.1,
-        memory=memory,
+        memory=_get_memory_config(memory_type),
         attention=AttentionConfig(
             hidden_size=512,
             num_heads=8,
@@ -195,31 +183,11 @@ def large_config(vocab_size: int, memory_type: Literal["standard", "decaying"]) 
         vocab_size: Vocabulary size
         memory_type: "standard" for TensorMemory, "decaying" for DecayingTensorMemory
     """
-    if memory_type == "standard":
-        memory = MemoryConfig(
-            dim=64,
-            eps=1e-6,
-            use_delta_rule=False,
-            max_delta=10.0,
-            max_memory=100.0,
-            max_norm=1000.0,
-        )
-    else:
-        memory = DecayingMemoryConfig(
-            dim=64,
-            eps=1e-6,
-            use_delta_rule=False,
-            max_delta=10.0,
-            max_memory=100.0,
-            max_norm=1000.0,
-            decay=0.95,
-        )
-
     return LMConfig(
         vocab_size=vocab_size,
         num_layers=12,
         dropout=0.1,
-        memory=memory,
+        memory=_get_memory_config(memory_type),
         attention=AttentionConfig(
             hidden_size=768,
             num_heads=12,

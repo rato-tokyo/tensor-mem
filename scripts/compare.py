@@ -53,8 +53,8 @@ class ContextDependencyResult:
 
 def download_wikitext2() -> tuple[str, str, str]:
     """Download WikiText-2 dataset and return train/val/test text."""
-    import urllib.request
     import ssl
+    import urllib.request
 
     # Try datasets library first (most reliable for Hugging Face)
     try:
@@ -85,9 +85,9 @@ def download_wikitext2() -> tuple[str, str, str]:
         ctx.verify_mode = ssl.CERT_NONE
 
         def fetch(url: str) -> str:
-            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
             with urllib.request.urlopen(req, context=ctx) as response:
-                return response.read().decode('utf-8')
+                return response.read().decode("utf-8")
 
         train_text = fetch(f"{base_url}/train.txt")
         val_text = fetch(f"{base_url}/valid.txt")
@@ -98,9 +98,8 @@ def download_wikitext2() -> tuple[str, str, str]:
     except Exception as e:
         print(f"Failed to download: {e}")
         raise RuntimeError(
-            "Could not download WikiText-2. Please install datasets:\n"
-            "  pip install datasets"
-        )
+            "Could not download WikiText-2. Please install datasets:\n  pip install datasets"
+        ) from e
 
 
 def build_vocab(text: str, max_vocab: int) -> tuple[dict[str, int], dict[int, str]]:
@@ -139,18 +138,16 @@ def tokenize(text: str, vocab: dict[str, int]) -> list[int]:
 def batchify(data: list[int], batch_size: int, device: torch.device) -> torch.Tensor:
     """Reshape data into [seq_len, batch_size] for language modeling."""
     nbatch = len(data) // batch_size
-    data = data[:nbatch * batch_size]
+    data = data[: nbatch * batch_size]
     data = torch.tensor(data, dtype=torch.long, device=device)
     return data.view(batch_size, -1).t().contiguous()
 
 
-def get_batch(
-    source: torch.Tensor, i: int, seq_len: int
-) -> tuple[torch.Tensor, torch.Tensor]:
+def get_batch(source: torch.Tensor, i: int, seq_len: int) -> tuple[torch.Tensor, torch.Tensor]:
     """Get a batch of data for language modeling."""
     seq_len = min(seq_len, len(source) - 1 - i)
-    data = source[i:i + seq_len].t()  # [batch, seq_len]
-    target = source[i + 1:i + 1 + seq_len].t()  # [batch, seq_len]
+    data = source[i : i + seq_len].t()  # [batch, seq_len]
+    target = source[i + 1 : i + 1 + seq_len].t()  # [batch, seq_len]
     return data, target
 
 
@@ -344,8 +341,8 @@ def analyze_context_dependency(
         "long (20+)": (20, seq_len),
     }
 
-    correct_by_range: dict[str, int] = {k: 0 for k in ranges}
-    total_by_range: dict[str, int] = {k: 0 for k in ranges}
+    correct_by_range: dict[str, int] = dict.fromkeys(ranges, 0)
+    total_by_range: dict[str, int] = dict.fromkeys(ranges, 0)
 
     if has_memory:
         model.reset_memory()  # type: ignore
@@ -376,8 +373,7 @@ def analyze_context_dependency(
                 total_by_range[range_name] += total
 
     accuracies = {
-        k: correct_by_range[k] / total_by_range[k] if total_by_range[k] > 0 else 0.0
-        for k in ranges
+        k: correct_by_range[k] / total_by_range[k] if total_by_range[k] > 0 else 0.0 for k in ranges
     }
 
     return ContextDependencyResult(name=name, distance_accuracies=accuracies)
@@ -473,10 +469,14 @@ def main() -> None:
 
     device = torch.device(args.device)
     print(f"Device: {device}")
-    print(f"Architecture: d_model={args.d_model}, heads={args.num_heads}, "
-          f"layers={args.num_layers}, d_ff={args.d_ff}")
-    print(f"Training: max_epochs={args.max_epochs}, patience={args.patience}, "
-          f"seq_len={args.seq_len}, batch_size={args.batch_size}")
+    print(
+        f"Architecture: d_model={args.d_model}, heads={args.num_heads}, "
+        f"layers={args.num_layers}, d_ff={args.d_ff}"
+    )
+    print(
+        f"Training: max_epochs={args.max_epochs}, patience={args.patience}, "
+        f"seq_len={args.seq_len}, batch_size={args.batch_size}"
+    )
 
     # Load WikiText-2
     train_text, val_text, _ = download_wikitext2()

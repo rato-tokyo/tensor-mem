@@ -7,6 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .memory import MultiHeadMemory
+from .utils import elu_plus_one
 
 
 class LinearMemoryAttention(nn.Module):
@@ -18,13 +19,20 @@ class LinearMemoryAttention(nn.Module):
 
     Uses Dependency Injection - receives a pre-configured MultiHeadMemory instance.
 
-    Design:
+    Design (Causal Linear Attention):
         1. Project input to Q, K, V
         2. (Optional) L2 normalize Q, K, V for numerical stability
         3. Split into heads
-        4. RETRIEVE from memory using Q
-        5. UPDATE memory with K, V
-        6. Merge heads and project output
+        4. Apply σ (ELU+1) activation to Q and K
+        5. Compute causal attention using cumulative sums:
+           - cumsum_M[t] = Σ(i≤t) σ(K[i])^T @ V[i]
+           - cumsum_z[t] = Σ(i≤t) σ(K[i])
+           - output[t] = (σ(Q[t]) @ cumsum_M[t]) / (σ(Q[t]) @ cumsum_z[t] + eps)
+        6. UPDATE persistent memory with final cumsum values
+        7. Merge heads and project output
+
+    The persistent memory (MultiHeadMemory) accumulates across sequences,
+    while causal attention is computed within each sequence.
 
     Args:
         memory: Pre-configured MultiHeadMemory instance.
@@ -70,6 +78,7 @@ class LinearMemoryAttention(nn.Module):
         self.num_heads = memory.num_heads
         self.head_dim = memory.head_dim
         self.normalize_qkv = normalize_qkv
+        self.eps = memory.memories[0].eps
 
         proj_dim = self.num_heads * self.head_dim
 
@@ -85,6 +94,61 @@ class LinearMemoryAttention(nn.Module):
     ) -> None:
         """Reset memory for a new sequence."""
         self.memory.reset(device=device, dtype=dtype)
+
+    def _causal_linear_attention(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Compute causal linear attention using cumulative sums.
+
+        Args:
+            q: Activated queries σ(Q), shape [batch, num_heads, seq, head_dim]
+            k: Activated keys σ(K), shape [batch, num_heads, seq, head_dim]
+            v: Values, shape [batch, num_heads, seq, head_dim]
+
+        Returns:
+            Output tensor [batch, num_heads, seq, head_dim]
+        """
+        batch, num_heads, seq_len, head_dim = q.shape
+
+        # Compute KV outer products: [batch, num_heads, seq, head_dim, head_dim]
+        # kv[b, h, t, d1, d2] = k[b, h, t, d1] * v[b, h, t, d2]
+        kv = torch.einsum("bhsd,bhse->bhsde", k, v)
+
+        # Cumulative sum for causal attention
+        # cumsum_kv[t] = Σ(i≤t) K[i]^T @ V[i]
+        cumsum_kv = torch.cumsum(kv, dim=2)  # [batch, num_heads, seq, head_dim, head_dim]
+
+        # Cumulative sum for normalization
+        # cumsum_k[t] = Σ(i≤t) K[i]
+        cumsum_k = torch.cumsum(k, dim=2)  # [batch, num_heads, seq, head_dim]
+
+        # Add persistent memory contribution
+        if self.memory.is_initialized:
+            for h in range(num_heads):
+                mem = self.memory.memories[h]
+                if mem.M.device != q.device:
+                    mem.M = mem.M.to(q.device)
+                    mem.z = mem.z.to(q.device)
+                # Add persistent memory to cumsum
+                cumsum_kv[:, h] = cumsum_kv[:, h] + mem.M.unsqueeze(0).unsqueeze(0)
+                cumsum_k[:, h] = cumsum_k[:, h] + mem.z.unsqueeze(0).unsqueeze(0)
+
+        # Compute attention output: Q @ cumsum_KV
+        # output[b, h, t, d] = Σ_d1 q[b, h, t, d1] * cumsum_kv[b, h, t, d1, d]
+        numerator = torch.einsum("bhsd,bhsde->bhse", q, cumsum_kv)
+
+        # Compute normalization: Q @ cumsum_K
+        # norm[b, h, t] = Σ_d q[b, h, t, d] * cumsum_k[b, h, t, d]
+        denominator = torch.einsum("bhsd,bhsd->bhs", q, cumsum_k)
+
+        # Normalize
+        output = numerator / (denominator.unsqueeze(-1) + self.eps)
+
+        return output
 
     def forward(
         self,
@@ -123,11 +187,15 @@ class LinearMemoryAttention(nn.Module):
         k = k.view(batch, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
         v = v.view(batch, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
 
-        # Step 1: RETRIEVE from memory
-        output = self.memory.retrieve(q)
+        # Apply σ (ELU+1) activation to Q and K
+        sigma_q = elu_plus_one(q)
+        sigma_k = elu_plus_one(k)
 
-        # Step 2: UPDATE memory
-        self.memory.update(k, v)
+        # Compute causal linear attention
+        output = self._causal_linear_attention(sigma_q, sigma_k, v)
+
+        # Update persistent memory with current sequence's KV
+        self.memory.update(sigma_k, v)
 
         # Merge heads: [batch, num_heads, seq, head_dim] -> [batch, seq, num_heads * head_dim]
         output = output.transpose(1, 2).reshape(batch, seq_len, self.num_heads * self.head_dim)

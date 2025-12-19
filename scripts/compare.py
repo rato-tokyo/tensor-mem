@@ -151,39 +151,6 @@ def get_batch(source: torch.Tensor, i: int, seq_len: int) -> tuple[torch.Tensor,
     return data, target
 
 
-def create_tensor_memory_model(
-    vocab_size: int, d_model: int, num_heads: int, num_layers: int, d_ff: int
-) -> TensorMemoryLM:
-    """Create TensorMemoryLM with specified architecture."""
-    head_dim = d_model // num_heads
-    config = default_memory_config(dim=head_dim)
-
-    layers = [
-        Layer(
-            [TensorMemory(config) for _ in range(num_heads)],
-            hidden_size=d_model,
-            d_ff=d_ff,
-            bias=True,
-            normalize_qkv=False,
-        )
-        for _ in range(num_layers)
-    ]
-
-    return TensorMemoryLM(vocab_size=vocab_size, layers=layers)
-
-
-def create_standard_model(
-    vocab_size: int, d_model: int, num_heads: int, num_layers: int, d_ff: int, max_len: int
-) -> StandardTransformerLM:
-    """Create StandardTransformerLM with specified architecture."""
-    layers = [
-        StandardTransformerBlock(d_model=d_model, num_heads=num_heads, d_ff=d_ff)
-        for _ in range(num_layers)
-    ]
-
-    return StandardTransformerLM(vocab_size=vocab_size, max_len=max_len, layers=layers)
-
-
 def evaluate_ppl(
     model: nn.Module,
     data: torch.Tensor,
@@ -516,12 +483,22 @@ def main() -> None:
     print("Training: TensorMemoryLM (NoPE)")
     print("=" * 70)
 
-    tensor_model = create_tensor_memory_model(
+    # Declarative Configuration: structure is visible here
+    head_dim = args.d_model // args.num_heads
+    memory_config = default_memory_config(dim=head_dim)
+
+    tensor_model = TensorMemoryLM(
         vocab_size=actual_vocab_size,
-        d_model=args.d_model,
-        num_heads=args.num_heads,
-        num_layers=args.num_layers,
-        d_ff=args.d_ff,
+        layers=[
+            Layer(
+                [TensorMemory(memory_config) for _ in range(args.num_heads)],
+                hidden_size=args.d_model,
+                d_ff=args.d_ff,
+                bias=True,
+                normalize_qkv=False,
+            )
+            for _ in range(args.num_layers)
+        ],
     ).to(device)
 
     print(f"Parameters: {sum(p.numel() for p in tensor_model.parameters()):,}")
@@ -550,13 +527,18 @@ def main() -> None:
     print("Training: StandardTransformerLM (PE)")
     print("=" * 70)
 
-    standard_model = create_standard_model(
+    # Declarative Configuration: structure is visible here
+    standard_model = StandardTransformerLM(
         vocab_size=actual_vocab_size,
-        d_model=args.d_model,
-        num_heads=args.num_heads,
-        num_layers=args.num_layers,
-        d_ff=args.d_ff,
         max_len=args.seq_len,
+        layers=[
+            StandardTransformerBlock(
+                d_model=args.d_model,
+                num_heads=args.num_heads,
+                d_ff=args.d_ff,
+            )
+            for _ in range(args.num_layers)
+        ],
     ).to(device)
 
     print(f"Parameters: {sum(p.numel() for p in standard_model.parameters()):,}")

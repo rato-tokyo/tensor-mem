@@ -145,6 +145,11 @@ class BaseTensorMemory(nn.Module, ABC):
                 - delta_m: Memory matrix update
                 - delta_z: Normalization vector update
         """
+        # Ensure memory is on the same device as keys
+        if self.M.device != keys.device:
+            self.M = self.M.to(keys.device)
+            self.z = self.z.to(keys.device)
+
         batch, seq, _ = keys.shape
 
         sigma_k = elu_plus_one(keys)
@@ -187,6 +192,11 @@ class BaseTensorMemory(nn.Module, ABC):
         """
         if not self.is_initialized:
             raise RuntimeError("Memory not initialized. Call reset() first.")
+
+        # Ensure memory is on the same device as queries
+        if self.M.device != queries.device:
+            self.M = self.M.to(queries.device)
+            self.z = self.z.to(queries.device)
 
         sigma_q = elu_plus_one(queries)
         return self._retrieve_from_memory(sigma_q)

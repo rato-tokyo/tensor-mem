@@ -8,7 +8,6 @@ This package provides:
 Declarative Configuration:
     model = TensorMemoryLM(
         vocab_size=32000,
-        dropout=0.1,
         layers=[
             Layer([TensorMemory(config), ...], hidden_size=256, ...),
             Layer([TensorMemory(config), ...], hidden_size=256, ...),

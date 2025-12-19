@@ -151,7 +151,6 @@ def main() -> None:
     # TensorMemoryLM: 4 layers, 4 heads, hidden=256, d_ff=1024
     model = TensorMemoryLM(
         vocab_size=args.vocab_size,
-        dropout=0.1,
         layers=[
             Layer(
                 [
@@ -162,7 +161,6 @@ def main() -> None:
                 ],
                 hidden_size=256,
                 d_ff=1024,
-                dropout=0.1,
                 bias=True,
                 normalize_qkv=False,
             ),
@@ -175,7 +173,6 @@ def main() -> None:
                 ],
                 hidden_size=256,
                 d_ff=1024,
-                dropout=0.1,
                 bias=True,
                 normalize_qkv=False,
             ),
@@ -188,7 +185,6 @@ def main() -> None:
                 ],
                 hidden_size=256,
                 d_ff=1024,
-                dropout=0.1,
                 bias=True,
                 normalize_qkv=False,
             ),
@@ -201,7 +197,6 @@ def main() -> None:
                 ],
                 hidden_size=256,
                 d_ff=1024,
-                dropout=0.1,
                 bias=True,
                 normalize_qkv=False,
             ),

@@ -41,7 +41,6 @@ def main() -> None:
     # TensorMemoryLM: 4 layers, 4 heads, hidden=256, d_ff=1024
     tensor_mem_model = TensorMemoryLM(
         vocab_size=vocab_size,
-        dropout=0.1,
         layers=[
             Layer(
                 [
@@ -52,7 +51,6 @@ def main() -> None:
                 ],
                 hidden_size=256,
                 d_ff=1024,
-                dropout=0.1,
                 bias=True,
                 normalize_qkv=False,
             ),
@@ -65,7 +63,6 @@ def main() -> None:
                 ],
                 hidden_size=256,
                 d_ff=1024,
-                dropout=0.1,
                 bias=True,
                 normalize_qkv=False,
             ),
@@ -78,7 +75,6 @@ def main() -> None:
                 ],
                 hidden_size=256,
                 d_ff=1024,
-                dropout=0.1,
                 bias=True,
                 normalize_qkv=False,
             ),
@@ -91,7 +87,6 @@ def main() -> None:
                 ],
                 hidden_size=256,
                 d_ff=1024,
-                dropout=0.1,
                 bias=True,
                 normalize_qkv=False,
             ),
@@ -110,12 +105,11 @@ def main() -> None:
     standard_model = StandardTransformerLM(
         vocab_size=vocab_size,
         max_len=512,
-        dropout=0.1,
         layers=[
-            StandardTransformerBlock(d_model=d_model, num_heads=num_heads, d_ff=d_ff, dropout=0.1),
-            StandardTransformerBlock(d_model=d_model, num_heads=num_heads, d_ff=d_ff, dropout=0.1),
-            StandardTransformerBlock(d_model=d_model, num_heads=num_heads, d_ff=d_ff, dropout=0.1),
-            StandardTransformerBlock(d_model=d_model, num_heads=num_heads, d_ff=d_ff, dropout=0.1),
+            StandardTransformerBlock(d_model=d_model, num_heads=num_heads, d_ff=d_ff),
+            StandardTransformerBlock(d_model=d_model, num_heads=num_heads, d_ff=d_ff),
+            StandardTransformerBlock(d_model=d_model, num_heads=num_heads, d_ff=d_ff),
+            StandardTransformerBlock(d_model=d_model, num_heads=num_heads, d_ff=d_ff),
         ],
     )
 

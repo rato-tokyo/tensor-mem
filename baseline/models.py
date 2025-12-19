@@ -1,4 +1,4 @@
-"""Baseline LLM models for comparison.
+"""Standard Transformer LLM model for comparison.
 
 StandardTransformerLM: Traditional transformer with positional encoding (baseline).
 
@@ -6,12 +6,9 @@ Declarative Configuration:
     model = StandardTransformerLM(
         vocab_size=32000,
         max_len=512,
-        dropout=0.1,
         layers=[
-            StandardTransformerBlock(d_model=256, num_heads=4, d_ff=1024, dropout=0.1),
-            StandardTransformerBlock(d_model=256, num_heads=4, d_ff=1024, dropout=0.1),
-            StandardTransformerBlock(d_model=256, num_heads=4, d_ff=1024, dropout=0.1),
-            StandardTransformerBlock(d_model=256, num_heads=4, d_ff=1024, dropout=0.1),
+            StandardTransformerBlock(d_model=256, num_heads=4, d_ff=1024),
+            StandardTransformerBlock(d_model=256, num_heads=4, d_ff=1024),
         ],
     )
 """
@@ -23,66 +20,8 @@ import math
 import torch
 import torch.nn as nn
 
-
-class SinusoidalPositionalEncoding(nn.Module):
-    """Sinusoidal positional encoding from 'Attention Is All You Need'."""
-
-    def __init__(self, d_model: int, max_len: int, dropout: float) -> None:
-        super().__init__()
-        self.dropout = nn.Dropout(p=dropout)
-
-        pe = torch.zeros(max_len, d_model)
-        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        pe = pe.unsqueeze(0)  # (1, max_len, d_model)
-        self.register_buffer("pe", pe)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Add positional encoding to input."""
-        x = x + self.pe[:, : x.size(1), :]
-        result: torch.Tensor = self.dropout(x)
-        return result
-
-
-class StandardTransformerBlock(nn.Module):
-    """Standard transformer block with multi-head self-attention."""
-
-    def __init__(self, d_model: int, num_heads: int, d_ff: int, dropout: float) -> None:
-        super().__init__()
-        self.d_model = d_model
-        self.num_heads = num_heads
-        self.d_ff = d_ff
-        self.attention = nn.MultiheadAttention(
-            embed_dim=d_model,
-            num_heads=num_heads,
-            dropout=dropout,
-            batch_first=True,
-        )
-        self.norm1 = nn.LayerNorm(d_model)
-        self.norm2 = nn.LayerNorm(d_model)
-        self.ffn = nn.Sequential(
-            nn.Linear(d_model, d_ff),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(d_ff, d_model),
-            nn.Dropout(dropout),
-        )
-
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
-        """Forward pass with pre-norm architecture."""
-        normed = self.norm1(x)
-        attn_out, _ = self.attention(
-            normed,
-            normed,
-            normed,
-            attn_mask=attn_mask,
-            is_causal=attn_mask is None,
-        )
-        x = x + attn_out
-        x = x + self.ffn(self.norm2(x))
-        return x
+from .block import StandardTransformerBlock
+from .positional_encoding import SinusoidalPositionalEncoding
 
 
 class StandardTransformerLM(nn.Module):
@@ -95,10 +34,9 @@ class StandardTransformerLM(nn.Module):
         model = StandardTransformerLM(
             vocab_size=32000,
             max_len=512,
-            dropout=0.1,
             layers=[
-                StandardTransformerBlock(d_model=256, num_heads=4, d_ff=1024, dropout=0.1),
-                StandardTransformerBlock(d_model=256, num_heads=4, d_ff=1024, dropout=0.1),
+                StandardTransformerBlock(d_model=256, num_heads=4, d_ff=1024),
+                StandardTransformerBlock(d_model=256, num_heads=4, d_ff=1024),
             ],
         )
     """
@@ -107,7 +45,6 @@ class StandardTransformerLM(nn.Module):
         self,
         vocab_size: int,
         max_len: int,
-        dropout: float,
         layers: list[StandardTransformerBlock],
     ) -> None:
         """Initialize StandardTransformerLM.
@@ -115,7 +52,6 @@ class StandardTransformerLM(nn.Module):
         Args:
             vocab_size: Size of vocabulary.
             max_len: Maximum sequence length for positional encoding.
-            dropout: Dropout rate.
             layers: List of pre-configured StandardTransformerBlock instances.
         """
         super().__init__()
@@ -126,7 +62,7 @@ class StandardTransformerLM(nn.Module):
         self.d_model = layers[0].d_model
 
         self.embedding = nn.Embedding(vocab_size, self.d_model)
-        self.pos_encoding = SinusoidalPositionalEncoding(self.d_model, max_len, dropout)
+        self.pos_encoding = SinusoidalPositionalEncoding(self.d_model, max_len)
 
         self.layers = nn.ModuleList(layers)
 
@@ -134,27 +70,59 @@ class StandardTransformerLM(nn.Module):
         self.lm_head = nn.Linear(self.d_model, vocab_size, bias=False)
         self.lm_head.weight = self.embedding.weight
 
-    def forward(
-        self,
-        input_ids: torch.Tensor,
-        return_hidden: bool = False,
-    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
-        """Forward pass."""
+    def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
+        """Forward pass returning logits.
+
+        Args:
+            input_ids: Input token IDs of shape [batch, seq].
+
+        Returns:
+            Logits of shape [batch, seq, vocab_size].
+        """
+        hidden = self._compute_hidden(input_ids)
+        logits: torch.Tensor = self.lm_head(hidden)
+        return logits
+
+    def forward_with_hidden(self, input_ids: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Forward pass returning both logits and hidden states.
+
+        Args:
+            input_ids: Input token IDs of shape [batch, seq].
+
+        Returns:
+            Tuple of (logits, hidden_states):
+                - logits: [batch, seq, vocab_size]
+                - hidden_states: [batch, seq, d_model]
+        """
+        hidden = self._compute_hidden(input_ids)
+        logits = self.lm_head(hidden)
+        return logits, hidden
+
+    def _compute_hidden(self, input_ids: torch.Tensor) -> torch.Tensor:
+        """Compute hidden states from input IDs.
+
+        Args:
+            input_ids: Input token IDs of shape [batch, seq].
+
+        Returns:
+            Hidden states of shape [batch, seq, d_model].
+        """
         x = self.embedding(input_ids) * math.sqrt(self.d_model)
         x = self.pos_encoding(x)
 
         for layer in self.layers:
             x = layer(x)
 
-        hidden = self.norm(x)
-        logits = self.lm_head(hidden)
-
-        if return_hidden:
-            return logits, hidden
-        result: torch.Tensor = logits
-        return result
+        out: torch.Tensor = self.norm(x)
+        return out
 
     def get_hidden_states(self, input_ids: torch.Tensor) -> torch.Tensor:
-        """Get hidden states without computing logits."""
-        _, hidden = self.forward(input_ids, return_hidden=True)
-        return hidden
+        """Get hidden states without computing logits.
+
+        Args:
+            input_ids: Input token IDs of shape [batch, seq].
+
+        Returns:
+            Hidden states of shape [batch, seq, d_model].
+        """
+        return self._compute_hidden(input_ids)

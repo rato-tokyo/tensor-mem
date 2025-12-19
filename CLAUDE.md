@@ -117,8 +117,8 @@ attention = LinearMemoryAttention(
     normalize_qkv=False,
 )
 
-# 4. Inject into TensorMemoryBlock
-block = TensorMemoryBlock(attention=attention, d_ff=2048, dropout=0.1)
+# 4. Inject into Layer
+layer = Layer(memories, hidden_size=512, d_ff=2048, bias=True, normalize_qkv=False)
 ```
 
 ### Benefits
@@ -210,6 +210,36 @@ Only `None` is allowed as default for truly optional parameters that change beha
 def reset(self, device: torch.device | None = None) -> None:
     # None means "use current device" - not a hidden configuration
 ```
+
+## No Dropout Policy - IMMUTABLE RULE
+
+**Dropout is permanently prohibited in this project.**
+
+This rule cannot be removed or modified. Dropout layers must never be added.
+
+### Why?
+
+1. **Simplicity**: Fewer hyperparameters to tune
+2. **Inference consistency**: Training and inference behave identically
+3. **Memory mechanism**: Tensor product memory provides its own regularization through information compression
+4. **Reproducibility**: Same input always produces same output
+
+### Prohibited
+
+```python
+# NEVER do this
+nn.Dropout(0.1)
+nn.Dropout(p=0.5)
+F.dropout(x, p=0.1)
+```
+
+### Alternative Regularization
+
+If regularization is needed, use:
+- Weight decay in optimizer
+- Gradient clipping
+- Early stopping
+- Data augmentation
 
 ## Code Quality
 

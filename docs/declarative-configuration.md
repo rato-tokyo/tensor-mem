@@ -15,12 +15,11 @@ config = default_memory_config(dim=64)
 
 model = TensorMemoryLM(
     vocab_size=32000,
-    dropout=0.1,
     layers=[
-        Layer([TensorMemory(config), TensorMemory(config), TensorMemory(config), TensorMemory(config)], hidden_size=256, d_ff=1024, dropout=0.1, bias=True, normalize_qkv=False),
-        Layer([TensorMemory(config), TensorMemory(config), TensorMemory(config), TensorMemory(config)], hidden_size=256, d_ff=1024, dropout=0.1, bias=True, normalize_qkv=False),
-        Layer([TensorMemory(config), TensorMemory(config), TensorMemory(config), TensorMemory(config)], hidden_size=256, d_ff=1024, dropout=0.1, bias=True, normalize_qkv=False),
-        Layer([TensorMemory(config), TensorMemory(config), TensorMemory(config), TensorMemory(config)], hidden_size=256, d_ff=1024, dropout=0.1, bias=True, normalize_qkv=False),
+        Layer([TensorMemory(config), TensorMemory(config), TensorMemory(config), TensorMemory(config)], hidden_size=256, d_ff=1024, bias=True, normalize_qkv=False),
+        Layer([TensorMemory(config), TensorMemory(config), TensorMemory(config), TensorMemory(config)], hidden_size=256, d_ff=1024, bias=True, normalize_qkv=False),
+        Layer([TensorMemory(config), TensorMemory(config), TensorMemory(config), TensorMemory(config)], hidden_size=256, d_ff=1024, bias=True, normalize_qkv=False),
+        Layer([TensorMemory(config), TensorMemory(config), TensorMemory(config), TensorMemory(config)], hidden_size=256, d_ff=1024, bias=True, normalize_qkv=False),
     ],
 )
 ```
@@ -29,7 +28,7 @@ model = TensorMemoryLM(
 - 4レイヤーであることが一目でわかる
 - 各レイヤーに4つのメモリヘッドがあることが見える
 - 各メモリの設定（dim=64）が明示的
-- hidden_size, d_ff, dropoutなどすべての設定が見える
+- hidden_size, d_ffなどすべての設定が見える
 
 ## Anti-pattern（禁止）
 

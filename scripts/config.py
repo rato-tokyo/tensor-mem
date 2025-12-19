@@ -1,11 +1,19 @@
-"""Configuration helpers for training scripts.
+"""Configuration for training scripts.
 
-These are convenience functions for scripts, not part of the core library.
+All experiment settings are defined here.
+CLI parameters are prohibited - use this config file.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from tensor_mem import DecayingMemoryConfig, MemoryConfig
+
+
+# =============================================================================
+# Memory Configurations
+# =============================================================================
 
 
 def default_memory_config(dim: int) -> MemoryConfig:
@@ -46,3 +54,47 @@ def default_decaying_memory_config(dim: int, decay: float) -> DecayingMemoryConf
         max_norm=1000.0,
         decay=decay,
     )
+
+
+# =============================================================================
+# Experiment Configuration
+# =============================================================================
+
+
+@dataclass(frozen=True)
+class ExperimentConfig:
+    """Configuration for WikiText-2 comparison experiment.
+
+    All settings are defined here. No CLI parameters.
+    Edit this dataclass to change experiment settings.
+    """
+
+    # Device
+    device: str = "cuda"
+
+    # Model architecture
+    d_model: int = 256
+    num_heads: int = 4
+    num_layers: int = 4
+    d_ff: int = 1024
+    vocab_size: int = 10000
+
+    # Training
+    max_epochs: int = 50
+    patience: int = 2
+    seq_len: int = 64
+    batch_size: int = 32
+    lr: float = 1e-3
+    clip: float = 0.5
+
+    # Data
+    data_fraction: float = 1.0
+
+    @property
+    def head_dim(self) -> int:
+        """Compute head dimension from model dimension and number of heads."""
+        return self.d_model // self.num_heads
+
+
+# Default experiment configuration
+EXPERIMENT_CONFIG = ExperimentConfig()

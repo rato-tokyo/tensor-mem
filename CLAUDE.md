@@ -241,6 +241,53 @@ If regularization is needed, use:
 - Early stopping
 - Data augmentation
 
+## No CLI Parameters Policy - IMMUTABLE RULE
+
+**CLIパラメータでの設定指定は厳禁。**
+
+このルールは削除・変更不可。すべての設定はconfigファイルで管理する。
+
+### Why?
+
+1. **再現性**: 実験設定がコードとして残る
+2. **透明性**: 設定がファイルに明示的に記述される
+3. **バージョン管理**: 設定変更がgit履歴に残る
+4. **Declarative Configurationとの一貫性**: 構造も設定もコードで明示
+
+### Correct Pattern
+
+```python
+# scripts/config.py
+@dataclass(frozen=True)
+class ExperimentConfig:
+    device: str = "cuda"
+    d_model: int = 256
+    num_heads: int = 4
+    # ...
+
+EXPERIMENT_CONFIG = ExperimentConfig()
+
+# scripts/compare.py
+def main() -> None:
+    cfg = EXPERIMENT_CONFIG
+    # Use cfg.d_model, cfg.num_heads, etc.
+```
+
+### Anti-pattern (NEVER do this)
+
+```python
+# BAD: argparseでパラメータ受け取り
+parser = argparse.ArgumentParser()
+parser.add_argument("--d-model", type=int, default=256)
+parser.add_argument("--num-layers", type=int, default=4)
+args = parser.parse_args()
+
+# BAD: forループでモデル構造を動的生成
+layers = [Layer(...) for _ in range(args.num_layers)]
+```
+
+CLIパラメータは設定を隠蔽し、Declarative Configurationの原則に違反する。
+
 ## Code Quality
 
 - Python 3.11 specific

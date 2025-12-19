@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 
 from tensor_mem.attention import LinearMemoryAttention
+from tensor_mem.layer import FeedForwardLayer
 from tensor_mem.memory import BaseTensorMemory, MultiHeadMemory
 
 
@@ -13,6 +14,10 @@ class Layer(nn.Module):
     """Single transformer layer with tensor product memory attention.
 
     Declarative Configuration: receives list of memory instances directly.
+
+    Uses pre-norm architecture:
+        x = x + attention(LayerNorm(x))
+        x = x + ffn(LayerNorm(x))
 
     Args:
         memories: List of TensorMemory or DecayingTensorMemory instances.
@@ -41,11 +46,7 @@ class Layer(nn.Module):
 
         self.norm1 = nn.LayerNorm(hidden_size)
         self.norm2 = nn.LayerNorm(hidden_size)
-        self.ffn = nn.Sequential(
-            nn.Linear(hidden_size, d_ff),
-            nn.GELU(),
-            nn.Linear(d_ff, hidden_size),
-        )
+        self.ffn = FeedForwardLayer(hidden_size=hidden_size, d_ff=d_ff)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass with pre-norm architecture."""

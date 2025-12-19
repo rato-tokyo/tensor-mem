@@ -3,6 +3,7 @@
 This package provides:
 - Memory: TensorMemory, DecayingTensorMemory, MultiHeadMemory
 - Attention: LinearMemoryAttention
+- Layer: FeedForwardLayer, PreNormBlock
 - LLM: TensorMemoryLM, Layer
 
 Declarative Configuration:
@@ -16,6 +17,10 @@ Declarative Configuration:
 """
 
 from .attention import LinearMemoryAttention
+from .layer import (
+    FeedForwardLayer,
+    PreNormBlock,
+)
 from .llm import (
     Layer,
     TensorMemoryLM,
@@ -40,6 +45,9 @@ __all__ = [
     "DecayingMemoryConfig",
     # Attention
     "LinearMemoryAttention",
+    # Layer components
+    "FeedForwardLayer",
+    "PreNormBlock",
     # LLM classes (Declarative Configuration)
     "Layer",
     "TensorMemoryLM",

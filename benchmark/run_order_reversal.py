@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import torch
 
-from baseline import create_standard_transformer_lm, create_tensor_memory_lm, small_config
+from baseline import create_standard_transformer_lm
 from benchmark.order_reversal import OrderReversalBenchmark, print_comparison
+from tensor_mem import create_tensor_memory_lm, small_config
 
 
 def main():

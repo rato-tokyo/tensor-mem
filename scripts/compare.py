@@ -5,7 +5,8 @@ This script trains both models on WikiText-2 and compares:
 - Train/Val Perplexity (PPL)
 - Context dependency: accuracy at different distances from context
 
-Configuration is defined in config.py. No CLI parameters.
+Configuration: config.py
+Model definitions: models.py
 
 Usage:
     python scripts/compare.py
@@ -21,10 +22,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import torch
 
 from analysis import ContextDependencyResult, analyze_context_dependency, print_results
-from baseline import StandardTransformerBlock, StandardTransformerLM
-from config import EXPERIMENT_CONFIG, default_memory_config
+from config import EXPERIMENT_CONFIG
 from data import batchify, build_vocab, download_wikitext2, tokenize
-from tensor_mem import Layer, TensorMemory, TensorMemoryLM
+from models import create_standard_transformer_model, create_tensor_memory_model
 from training import TrainingResult, train_model
 
 
@@ -74,48 +74,13 @@ def main() -> None:
     context_results: list[ContextDependencyResult] = []
 
     # =========================================================================
-    # TensorMemoryLM - Declarative Configuration
+    # TensorMemoryLM
     # =========================================================================
     print("\n" + "=" * 70)
     print("Training: TensorMemoryLM (NoPE)")
     print("=" * 70)
 
-    memory_config = default_memory_config(dim=cfg.head_dim)
-
-    # Declarative Configuration: 4 layers, 4 heads each - structure is visible
-    tensor_model = TensorMemoryLM(
-        vocab_size=actual_vocab_size,
-        layers=[
-            Layer(
-                [TensorMemory(memory_config), TensorMemory(memory_config), TensorMemory(memory_config), TensorMemory(memory_config)],
-                hidden_size=cfg.d_model,
-                d_ff=cfg.d_ff,
-                bias=True,
-                normalize_qkv=False,
-            ),
-            Layer(
-                [TensorMemory(memory_config), TensorMemory(memory_config), TensorMemory(memory_config), TensorMemory(memory_config)],
-                hidden_size=cfg.d_model,
-                d_ff=cfg.d_ff,
-                bias=True,
-                normalize_qkv=False,
-            ),
-            Layer(
-                [TensorMemory(memory_config), TensorMemory(memory_config), TensorMemory(memory_config), TensorMemory(memory_config)],
-                hidden_size=cfg.d_model,
-                d_ff=cfg.d_ff,
-                bias=True,
-                normalize_qkv=False,
-            ),
-            Layer(
-                [TensorMemory(memory_config), TensorMemory(memory_config), TensorMemory(memory_config), TensorMemory(memory_config)],
-                hidden_size=cfg.d_model,
-                d_ff=cfg.d_ff,
-                bias=True,
-                normalize_qkv=False,
-            ),
-        ],
-    ).to(device)
+    tensor_model = create_tensor_memory_model(vocab_size=actual_vocab_size).to(device)
 
     print(f"Parameters: {sum(p.numel() for p in tensor_model.parameters()):,}")
 
@@ -139,23 +104,13 @@ def main() -> None:
     context_results.append(tensor_context)
 
     # =========================================================================
-    # StandardTransformerLM - Declarative Configuration
+    # StandardTransformerLM
     # =========================================================================
     print("\n" + "=" * 70)
     print("Training: StandardTransformerLM (PE)")
     print("=" * 70)
 
-    # Declarative Configuration: 4 layers - structure is visible
-    standard_model = StandardTransformerLM(
-        vocab_size=actual_vocab_size,
-        max_len=cfg.seq_len,
-        layers=[
-            StandardTransformerBlock(d_model=cfg.d_model, num_heads=cfg.num_heads, d_ff=cfg.d_ff),
-            StandardTransformerBlock(d_model=cfg.d_model, num_heads=cfg.num_heads, d_ff=cfg.d_ff),
-            StandardTransformerBlock(d_model=cfg.d_model, num_heads=cfg.num_heads, d_ff=cfg.d_ff),
-            StandardTransformerBlock(d_model=cfg.d_model, num_heads=cfg.num_heads, d_ff=cfg.d_ff),
-        ],
-    ).to(device)
+    standard_model = create_standard_transformer_model(vocab_size=actual_vocab_size).to(device)
 
     print(f"Parameters: {sum(p.numel() for p in standard_model.parameters()):,}")
 

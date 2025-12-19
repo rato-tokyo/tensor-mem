@@ -31,7 +31,8 @@ class SinusoidalPositionalEncoding(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Add positional encoding to input."""
         x = x + self.pe[:, : x.size(1), :]
-        return self.dropout(x)
+        result: torch.Tensor = self.dropout(x)
+        return result
 
 
 class StandardTransformerBlock(nn.Module):
@@ -123,7 +124,8 @@ class StandardTransformerLM(nn.Module):
 
         if return_hidden:
             return logits, hidden
-        return logits
+        result: torch.Tensor = logits
+        return result
 
     def get_hidden_states(self, input_ids: torch.Tensor) -> torch.Tensor:
         """Get hidden states without computing logits."""

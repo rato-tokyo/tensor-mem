@@ -3,20 +3,16 @@
 This package provides:
 - Memory: TensorMemory, DecayingTensorMemory, MultiHeadMemory
 - Attention: LinearMemoryAttention
-- LLM: TensorMemoryLM, TensorMemoryBlock, configuration classes
+- LLM: TensorMemoryLM, TensorMemoryBlock, factory functions
 """
 
 from .attention import LinearMemoryAttention
 from .llm import (
-    AttentionConfig,
-    LMConfig,
     TensorMemoryBlock,
     TensorMemoryLM,
-    TransformerBlockConfig,
-    create_tensor_memory_lm,
-    large_config,
-    medium_config,
-    small_config,
+    large_model,
+    medium_model,
+    small_model,
 )
 from .memory import (
     BaseTensorMemory,
@@ -45,16 +41,10 @@ __all__ = [
     # LLM classes
     "TensorMemoryBlock",
     "TensorMemoryLM",
-    # LLM Config classes
-    "AttentionConfig",
-    "LMConfig",
-    "TransformerBlockConfig",
-    # Preset configs
-    "large_config",
-    "medium_config",
-    "small_config",
-    # Factory functions
-    "create_tensor_memory_lm",
+    # Factory functions (Declarative Configuration)
+    "large_model",
+    "medium_model",
+    "small_model",
 ]
 
 __version__ = "0.1.0"

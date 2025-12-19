@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import torch
 import torch.nn as nn
 
-from tensor_mem import create_tensor_memory_lm, small_config
+from tensor_mem import small_model
 
 
 def create_synthetic_dataset(
@@ -144,14 +144,18 @@ def main() -> None:
     device = torch.device(args.device)
     print(f"Training on device: {device}")
 
-    # Create model
+    # Create model using Declarative Configuration
     print("\nCreating model...")
-    config = small_config(vocab_size=args.vocab_size, memory_type="standard")
-    model = create_tensor_memory_lm(config).to(device)
+    model = small_model(vocab_size=args.vocab_size, memory_type="standard").to(device)
+
+    # Get structure info from the actual model
+    num_layers = len(model.layers)
+    num_heads = model.layers[0].attention.num_heads
+    d_model = model.d_model
 
     num_params = sum(p.numel() for p in model.parameters())
     print(f"Model parameters: {num_params:,}")
-    print(f"Config: d_model={config.d_model}, heads={config.num_heads}, layers={config.num_layers}")
+    print(f"Structure: d_model={d_model}, heads={num_heads}, layers={num_layers}")
 
     # Create datasets
     print("\nCreating synthetic datasets...")

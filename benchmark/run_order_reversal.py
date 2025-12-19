@@ -16,12 +16,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import torch
 
-from baseline import create_standard_transformer_lm
+from baseline import StandardTransformerConfig, create_standard_transformer_lm
 from benchmark.order_reversal import OrderReversalBenchmark, print_comparison
-from tensor_mem import create_tensor_memory_lm, small_config
+from tensor_mem import small_model
 
 
-def main():
+def main() -> None:
     device = torch.device("cpu")
     print(f"Running on device: {device}")
 
@@ -32,29 +32,31 @@ def main():
     print(f"\nVocabulary size: {vocab_size}")
     print(f"Test triplets: {len(benchmark.triplets)}")
 
-    # Create models using centralized config
+    # Create models
     print("\nInitializing models...")
 
-    # Get small config for TensorMemoryLM
-    config = small_config(vocab_size=vocab_size, memory_type="standard")
+    # TensorMemoryLM: 4 layers, 4 heads, hidden=256, d_ff=1024
+    tensor_mem_model = small_model(vocab_size=vocab_size, memory_type="standard")
 
-    print(
-        f"Model config: d_model={config.d_model}, heads={config.num_heads}, layers={config.num_layers}"
-    )
+    # Get structure info from the model
+    num_layers = len(tensor_mem_model.layers)
+    num_heads = tensor_mem_model.layers[0].attention.num_heads
+    d_model = tensor_mem_model.d_model
+    d_ff = tensor_mem_model.layers[0].ffn[0].out_features
 
-    # Create standard transformer with explicit parameters
-    standard_model = create_standard_transformer_lm(
+    print(f"Model config: d_model={d_model}, heads={num_heads}, layers={num_layers}")
+
+    # Create standard transformer with matching parameters
+    std_config = StandardTransformerConfig(
         vocab_size=vocab_size,
-        d_model=config.d_model,
-        num_heads=config.num_heads,
-        num_layers=config.num_layers,
-        d_ff=config.block.d_ff,
+        d_model=d_model,
+        num_heads=num_heads,
+        num_layers=num_layers,
+        d_ff=d_ff,
         max_len=512,
-        dropout=config.dropout,
+        dropout=0.1,
     )
-
-    # Create tensor memory LM from config
-    tensor_mem_model = create_tensor_memory_lm(config)
+    standard_model = create_standard_transformer_lm(std_config)
 
     # Count parameters
     std_params = sum(p.numel() for p in standard_model.parameters())

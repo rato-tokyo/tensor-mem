@@ -51,21 +51,96 @@ The order matters for causality:
 
 This ensures current tokens don't attend to themselves through memory.
 
-## Dependency Injection Design Pattern
+## Declarative Configuration Design Pattern
 
-**All composable components use Dependency Injection.**
+**Model structure is defined declaratively - what you see is what you get.**
 
-Instead of creating child objects internally with parameters passed through multiple layers,
-components receive pre-configured instances from the outside.
+The entire model architecture is visible at the construction site.
+No hidden `num_layers` or `num_heads` parameters that magically create objects internally.
 
-### Correct Pattern
+### Core Principle
 
 ```python
-# 1. Create memory instances with desired configuration
-memories = [
-    DecayingTensorMemory(dim=64, decay=0.95, eps=1e-6)
-    for _ in range(num_heads)
-]
+# Structure is explicit and visible
+model = TensorMemoryLM(
+    vocab_size=32,
+    dropout=0.1,
+    layers=[
+        TensorMemoryBlock(
+            attention=LinearMemoryAttention(
+                memory=MultiHeadMemory([
+                    TensorMemory(config) for _ in range(4)  # 4 heads visible
+                ]),
+                hidden_size=256,
+                bias=True,
+                normalize_qkv=False,
+            ),
+            d_ff=1024,
+            dropout=0.1,
+        ),
+        # ... more layers explicitly listed
+    ],
+)
+```
+
+### Why This Design?
+
+1. **Transparency**: Model structure visible at a glance
+2. **No magic numbers**: `num_layers=4, num_heads=8` hidden in config → actual objects listed
+3. **Flexibility**: Each layer/head can have different configuration if needed
+4. **Debuggability**: Easy to inspect what was actually created
+
+### Factory Functions for Convenience
+
+For common configurations, use factory functions that return the declarative structure:
+
+```python
+def small_model(vocab_size: int) -> TensorMemoryLM:
+    """Create a small model with 4 layers, 4 heads."""
+    memory_config = default_memory_config(dim=64)
+
+    def make_layer() -> TensorMemoryBlock:
+        return TensorMemoryBlock(
+            attention=LinearMemoryAttention(
+                memory=MultiHeadMemory([
+                    TensorMemory(memory_config) for _ in range(4)
+                ]),
+                hidden_size=256,
+                bias=True,
+                normalize_qkv=False,
+            ),
+            d_ff=1024,
+            dropout=0.1,
+        )
+
+    return TensorMemoryLM(
+        vocab_size=vocab_size,
+        dropout=0.1,
+        layers=[make_layer() for _ in range(4)],
+    )
+```
+
+### Anti-pattern (Do NOT do this)
+
+```python
+# BAD: Hidden structure in config
+config = LMConfig(
+    num_layers=4,      # Creates 4 layers internally - not visible
+    num_heads=8,       # Creates 8 heads per layer - not visible
+    memory=MemoryConfig(...),  # One config, but 32 memories created
+)
+model = create_model(config)  # Magic happens inside
+```
+
+## Dependency Injection
+
+**Components receive pre-configured instances, not configuration.**
+
+This works together with Declarative Configuration:
+
+```python
+# 1. Create memory instances
+memories = [TensorMemory(config) for _ in range(num_heads)]
 
 # 2. Inject into MultiHeadMemory
 multi_head = MultiHeadMemory(memories)
@@ -88,16 +163,6 @@ block = TensorMemoryBlock(attention=attention, d_ff=2048, dropout=0.1)
 2. **No parameter drilling**: Classes don't need to pass through kwargs they don't use
 3. **Testability**: Easy to inject mocks for testing
 4. **Flexibility**: Can mix different memory types per head if needed
-
-### Anti-pattern (Do NOT do this)
-
-```python
-# BAD: Parameters drilled through multiple layers
-class MultiHeadMemory:
-    def __init__(self, num_heads, head_dim, memory_class, **kwargs):
-        # Creates instances internally - hard to configure
-        self.memories = [memory_class(dim=head_dim, **kwargs) for ...]
-```
 
 ## No Legacy Code Policy
 

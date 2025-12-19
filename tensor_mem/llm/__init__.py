@@ -1,40 +1,29 @@
-"""Tensor Memory LLM models and configuration.
+"""Tensor Memory LLM models.
 
 This module provides:
 - TensorMemoryLM: Pure tensor product memory LLM (NoPE)
 - TensorMemoryBlock: Transformer block using tensor product memory
-- Configuration dataclasses for centralized settings
-- Factory functions for creating models
+- Factory functions for creating preset model configurations
 """
 
 from __future__ import annotations
 
 from tensor_mem.llm.config import (
-    AttentionConfig,
-    LMConfig,
-    TransformerBlockConfig,
-    large_config,
-    medium_config,
-    small_config,
+    large_model,
+    medium_model,
+    small_model,
 )
 from tensor_mem.llm.models import (
     TensorMemoryBlock,
     TensorMemoryLM,
-    create_tensor_memory_lm,
 )
 
 __all__ = [
-    # Config classes
-    "AttentionConfig",
-    "LMConfig",
-    "TransformerBlockConfig",
-    # Preset configs
-    "large_config",
-    "medium_config",
-    "small_config",
     # Model classes
     "TensorMemoryBlock",
     "TensorMemoryLM",
     # Factory functions
-    "create_tensor_memory_lm",
+    "large_model",
+    "medium_model",
+    "small_model",
 ]

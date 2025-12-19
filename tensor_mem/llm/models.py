@@ -12,10 +12,6 @@ import torch
 import torch.nn as nn
 
 from tensor_mem.attention import LinearMemoryAttention
-from tensor_mem.memory import DecayingTensorMemory, MultiHeadMemory, TensorMemory
-from tensor_mem.memory.config import DecayingMemoryConfig, MemoryConfig
-
-from .config import LMConfig
 
 
 class TensorMemoryBlock(nn.Module):
@@ -104,74 +100,3 @@ class TensorMemoryLM(nn.Module):
         """Reset memory state in all layers."""
         for layer in self.layers:
             layer.reset_memory()
-
-
-def _create_memories_for_layer(
-    memory_config: MemoryConfig | DecayingMemoryConfig,
-    num_heads: int,
-) -> list[TensorMemory | DecayingTensorMemory]:
-    """Create memory instances for a single layer.
-
-    Args:
-        memory_config: Memory configuration.
-        num_heads: Number of attention heads.
-
-    Returns:
-        List of memory instances for the layer.
-    """
-    if isinstance(memory_config, DecayingMemoryConfig):
-        return [DecayingTensorMemory(memory_config) for _ in range(num_heads)]
-    return [TensorMemory(memory_config) for _ in range(num_heads)]
-
-
-def _create_attention_block(
-    memories: list[TensorMemory | DecayingTensorMemory],
-    config: LMConfig,
-) -> TensorMemoryBlock:
-    """Create a TensorMemoryBlock with the given memories.
-
-    Args:
-        memories: List of memory instances for the layer.
-        config: LMConfig containing attention and block settings.
-
-    Returns:
-        Configured TensorMemoryBlock instance.
-    """
-    mh_memory = MultiHeadMemory(memories)
-
-    attention = LinearMemoryAttention(
-        memory=mh_memory,
-        hidden_size=config.attention.hidden_size,
-        bias=config.attention.bias,
-        normalize_qkv=config.attention.normalize_qkv,
-    )
-
-    return TensorMemoryBlock(
-        attention=attention,
-        d_ff=config.block.d_ff,
-        dropout=config.block.dropout,
-    )
-
-
-def create_tensor_memory_lm(config: LMConfig) -> TensorMemoryLM:
-    """Factory function to create TensorMemoryLM from config.
-
-    Args:
-        config: LMConfig containing all model settings
-
-    Returns:
-        Configured TensorMemoryLM instance
-    """
-    layers = [
-        _create_attention_block(
-            _create_memories_for_layer(config.memory, config.num_heads),
-            config,
-        )
-        for _ in range(config.num_layers)
-    ]
-
-    return TensorMemoryLM(
-        vocab_size=config.vocab_size,
-        layers=layers,
-        dropout=config.dropout,
-    )

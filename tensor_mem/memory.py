@@ -26,11 +26,26 @@ class TensorMemory(nn.Module):
 
     Where σ = ELU + 1 activation function.
 
+    Delta Rule (optional):
+        When use_delta_rule=True, subtracts existing bindings before update:
+        delta_v = V - retrieve(K)
+        M = M + σ(K)^T @ delta_v / (batch * seq)
+        This prevents duplicate bindings and improves long-context performance.
+
+    Numerical Stability:
+        - delta_m is clamped to [-max_delta, max_delta] to prevent overflow
+        - M is clamped to [-max_memory, max_memory] to prevent accumulation explosion
+        - z is clamped to [eps, max_norm] to ensure valid normalization
+
     For multi-head attention, create multiple TensorMemory instances.
 
     Args:
         dim: Dimension of the memory vectors.
         eps: Small constant for numerical stability.
+        use_delta_rule: Whether to use Delta Rule for updates.
+        max_delta: Maximum absolute value for update deltas (prevents overflow).
+        max_memory: Maximum absolute value for memory matrix M.
+        max_norm: Maximum value for normalization term z.
 
     Example:
         >>> memory = TensorMemory(dim=64)
@@ -48,11 +63,19 @@ class TensorMemory(nn.Module):
         self,
         dim: int,
         eps: float = 1e-6,
+        use_delta_rule: bool = False,
+        max_delta: float = 10.0,
+        max_memory: float = 100.0,
+        max_norm: float = 1000.0,
     ) -> None:
         """Initialize TensorMemory."""
         super().__init__()
         self._dim = dim
         self.eps = eps
+        self.use_delta_rule = use_delta_rule
+        self.max_delta = max_delta
+        self.max_memory = max_memory
+        self.max_norm = max_norm
 
         self.register_buffer("M", None, persistent=False)
         self.register_buffer("z", None, persistent=False)
@@ -72,7 +95,7 @@ class TensorMemory(nn.Module):
         """Check if memory is empty (all zeros or not initialized)."""
         if not self.is_initialized:
             return True
-        return bool(torch.all(self.z == 0).item())
+        return self.z.sum().item() == 0
 
     def reset(
         self,
@@ -113,13 +136,30 @@ class TensorMemory(nn.Module):
 
         sigma_k = elu_plus_one(keys)
 
+        # Delta Rule: subtract existing bindings before update
+        if self.use_delta_rule and not self.is_empty:
+            retrieved = torch.matmul(sigma_k, self.M)
+            norm = torch.matmul(sigma_k, self.z)
+            existing = retrieved / (norm.unsqueeze(-1) + self.eps)
+            update_values = values - existing
+        else:
+            update_values = values
+
         # M = M + σ(K)^T @ V / (batch * seq)
-        delta_m = torch.einsum("bsd,bse->de", sigma_k, values)
-        self.M = self.M + delta_m / (batch * seq)
+        delta_m = torch.einsum("bsd,bse->de", sigma_k, update_values)
+        delta_m = delta_m / (batch * seq)
+
+        # Clamp delta to prevent overflow (especially in fp16)
+        delta_m = torch.clamp(delta_m, min=-self.max_delta, max=self.max_delta)
+
+        # Update and clamp M to prevent accumulation explosion
+        self.M = torch.clamp(self.M + delta_m, min=-self.max_memory, max=self.max_memory)
 
         # z = z + Σσ(K) / batch
-        delta_z = sigma_k.sum(dim=(0, 1))
-        self.z = self.z + delta_z / batch
+        delta_z = sigma_k.sum(dim=(0, 1)) / batch
+
+        # Clamp z to ensure valid normalization
+        self.z = torch.clamp(self.z + delta_z, min=self.eps, max=self.max_norm)
 
     def retrieve(
         self,
@@ -166,6 +206,7 @@ class MultiHeadMemory(nn.Module):
         num_heads: Number of memory heads.
         head_dim: Dimension per head.
         eps: Small constant for numerical stability.
+        use_delta_rule: Whether to use Delta Rule for updates.
 
     Example:
         >>> mh_memory = MultiHeadMemory(num_heads=8, head_dim=64)
@@ -185,6 +226,7 @@ class MultiHeadMemory(nn.Module):
         num_heads: int,
         head_dim: int,
         eps: float = 1e-6,
+        use_delta_rule: bool = False,
     ) -> None:
         """Initialize MultiHeadMemory."""
         super().__init__()
@@ -192,7 +234,10 @@ class MultiHeadMemory(nn.Module):
         self.head_dim = head_dim
 
         self.memories = nn.ModuleList(
-            [TensorMemory(dim=head_dim, eps=eps) for _ in range(num_heads)]
+            [
+                TensorMemory(dim=head_dim, eps=eps, use_delta_rule=use_delta_rule)
+                for _ in range(num_heads)
+            ]
         )
 
     @property

@@ -83,7 +83,7 @@ def multi_head_memory_example():
 
     # Create multi-head memory
     mh_memory = MultiHeadMemory(num_heads=num_heads, head_dim=head_dim)
-    print(f"Created MultiHeadMemory:")
+    print("Created MultiHeadMemory:")
     print(f"  num_heads: {num_heads}")
     print(f"  head_dim: {head_dim}")
     print(f"  total memories: {len(mh_memory.memories)}")
@@ -197,10 +197,9 @@ def custom_transformer_block_example():
     num_heads = 4
     num_layers = 4
 
-    blocks = torch.nn.ModuleList([
-        TransformerBlock(hidden_size, num_heads)
-        for _ in range(num_layers)
-    ])
+    blocks = torch.nn.ModuleList(
+        [TransformerBlock(hidden_size, num_heads) for _ in range(num_layers)]
+    )
 
     print(f"Created {num_layers} transformer blocks")
     print(f"  hidden_size: {hidden_size}")

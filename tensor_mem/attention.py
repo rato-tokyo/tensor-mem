@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as f
 
 from .memory import MultiHeadMemory
 
@@ -17,10 +18,11 @@ class LinearMemoryAttention(nn.Module):
 
     Design:
         1. Project input to Q, K, V
-        2. Split into heads
-        3. RETRIEVE from memory using Q
-        4. UPDATE memory with K, V
-        5. Merge heads and project output
+        2. (Optional) L2 normalize Q, K, V for numerical stability
+        3. Split into heads
+        4. RETRIEVE from memory using Q
+        5. UPDATE memory with K, V
+        6. Merge heads and project output
 
     Args:
         hidden_size: Hidden dimension of the model.
@@ -28,6 +30,12 @@ class LinearMemoryAttention(nn.Module):
         head_dim: Dimension per head. If None, computed as hidden_size // num_heads.
         eps: Small constant for numerical stability.
         bias: Whether to use bias in projections.
+        use_delta_rule: Whether to use Delta Rule for memory updates.
+        normalize_qkv: Whether to L2 normalize Q, K, V after projection.
+            Recommended for fp16 training to prevent overflow.
+
+    Raises:
+        ValueError: If head_dim is None and hidden_size is not divisible by num_heads.
 
     Example:
         >>> attn = LinearMemoryAttention(hidden_size=512, num_heads=8)
@@ -43,14 +51,25 @@ class LinearMemoryAttention(nn.Module):
         head_dim: int | None = None,
         eps: float = 1e-6,
         bias: bool = True,
+        use_delta_rule: bool = False,
+        normalize_qkv: bool = False,
     ) -> None:
         """Initialize LinearMemoryAttention."""
         super().__init__()
 
         self.hidden_size = hidden_size
         self.num_heads = num_heads
-        self.head_dim = head_dim or (hidden_size // num_heads)
-        self.eps = eps
+        self.normalize_qkv = normalize_qkv
+
+        if head_dim is None:
+            if hidden_size % num_heads != 0:
+                raise ValueError(
+                    f"hidden_size ({hidden_size}) must be divisible by "
+                    f"num_heads ({num_heads}) when head_dim is not specified"
+                )
+            self.head_dim = hidden_size // num_heads
+        else:
+            self.head_dim = head_dim
 
         proj_dim = self.num_heads * self.head_dim
 
@@ -63,6 +82,7 @@ class LinearMemoryAttention(nn.Module):
             num_heads=self.num_heads,
             head_dim=self.head_dim,
             eps=eps,
+            use_delta_rule=use_delta_rule,
         )
 
     def reset_memory(
@@ -98,6 +118,12 @@ class LinearMemoryAttention(nn.Module):
         q = self.q_proj(hidden_states)
         k = self.k_proj(hidden_states)
         v = self.v_proj(hidden_states)
+
+        # Optional L2 normalization for numerical stability (recommended for fp16)
+        if self.normalize_qkv:
+            q = f.normalize(q, p=2, dim=-1)
+            k = f.normalize(k, p=2, dim=-1)
+            v = f.normalize(v, p=2, dim=-1)
 
         # Split into heads: [batch, seq, num_heads * head_dim] -> [batch, num_heads, seq, head_dim]
         q = q.view(batch, seq_len, self.num_heads, self.head_dim).transpose(1, 2)

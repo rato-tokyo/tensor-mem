@@ -20,6 +20,14 @@ class TestTensorMemoryInit:
         memory = TensorMemory(dim=64, eps=1e-8)
         assert memory.eps == 1e-8
 
+    def test_delta_rule_init(self):
+        """Test delta rule initialization."""
+        memory = TensorMemory(dim=64, use_delta_rule=True)
+        assert memory.use_delta_rule is True
+
+        memory2 = TensorMemory(dim=64)
+        assert memory2.use_delta_rule is False
+
     def test_not_initialized_before_reset(self):
         """Memory should not be initialized before reset."""
         memory = TensorMemory(dim=64)
@@ -124,6 +132,47 @@ class TestTensorMemoryUpdate:
             memory.update(keys, values)
 
         assert (memory.z > 0).all()
+
+    def test_delta_rule_update(self):
+        """Delta rule should subtract existing bindings."""
+        memory = TensorMemory(dim=64, use_delta_rule=True)
+        memory.reset()
+
+        keys = torch.randn(2, 10, 64)
+        values = torch.randn(2, 10, 64)
+
+        # First update (no existing bindings, same as normal)
+        memory.update(keys, values)
+        m_after_first = memory.M.clone()
+
+        # Second update with same keys should have smaller delta
+        memory.update(keys, values)
+
+        # Memory should still change but differently than without delta rule
+        assert not torch.allclose(memory.M, m_after_first)
+        assert not torch.isnan(memory.M).any()
+
+    def test_delta_rule_vs_normal(self):
+        """Delta rule should produce different results than normal update."""
+        torch.manual_seed(42)
+
+        memory_normal = TensorMemory(dim=64, use_delta_rule=False)
+        memory_delta = TensorMemory(dim=64, use_delta_rule=True)
+        memory_normal.reset()
+        memory_delta.reset()
+
+        keys = torch.randn(2, 10, 64)
+        values = torch.randn(2, 10, 64)
+
+        # First update should be the same
+        memory_normal.update(keys, values)
+        memory_delta.update(keys, values)
+        assert torch.allclose(memory_normal.M, memory_delta.M)
+
+        # Second update with same keys should differ
+        memory_normal.update(keys, values)
+        memory_delta.update(keys, values)
+        assert not torch.allclose(memory_normal.M, memory_delta.M)
 
 
 class TestTensorMemoryRetrieve:

@@ -40,6 +40,32 @@ class TestLinearMemoryAttentionInit:
         assert attn.memory.num_heads == 8
         assert len(attn.memory.memories) == 8
 
+    def test_invalid_head_dim_raises(self):
+        """Should raise error when hidden_size not divisible by num_heads."""
+        with pytest.raises(ValueError, match="must be divisible"):
+            LinearMemoryAttention(hidden_size=256, num_heads=3)
+
+    def test_custom_head_dim_bypasses_validation(self):
+        """Custom head_dim should bypass divisibility check."""
+        # This would fail without head_dim since 256 % 3 != 0
+        attn = LinearMemoryAttention(hidden_size=256, num_heads=3, head_dim=32)
+        assert attn.head_dim == 32
+        assert attn.num_heads == 3
+
+    def test_delta_rule_init(self):
+        """Test delta rule initialization."""
+        attn = LinearMemoryAttention(hidden_size=256, num_heads=4, use_delta_rule=True)
+        for m in attn.memory.memories:
+            assert m.use_delta_rule is True
+
+    def test_normalize_qkv_init(self):
+        """Test normalize_qkv initialization."""
+        attn = LinearMemoryAttention(hidden_size=256, num_heads=4, normalize_qkv=True)
+        assert attn.normalize_qkv is True
+
+        attn2 = LinearMemoryAttention(hidden_size=256, num_heads=4)
+        assert attn2.normalize_qkv is False
+
 
 class TestLinearMemoryAttentionForward:
     """Tests for LinearMemoryAttention forward pass."""
@@ -192,3 +218,75 @@ class TestLinearMemoryAttentionIntegration:
 
         assert output.dtype == torch.float16
         assert not torch.isnan(output).any()
+
+
+class TestNumericalStability:
+    """Tests for numerical stability features."""
+
+    def test_normalize_qkv_forward(self):
+        """Test forward with normalize_qkv enabled."""
+        attn = LinearMemoryAttention(hidden_size=256, num_heads=4, normalize_qkv=True)
+        x = torch.randn(2, 32, 256)
+
+        output = attn(x)
+
+        assert output.shape == (2, 32, 256)
+        assert not torch.isnan(output).any()
+        assert not torch.isinf(output).any()
+
+    def test_large_values_without_normalization(self):
+        """Large input values should be handled by clamping."""
+        attn = LinearMemoryAttention(hidden_size=256, num_heads=4)
+        # Large values that could cause overflow
+        x = torch.randn(2, 32, 256) * 10
+
+        output = attn(x)
+
+        assert not torch.isnan(output).any()
+        assert not torch.isinf(output).any()
+
+    def test_large_values_with_normalization(self):
+        """Large input values with normalization should be stable."""
+        attn = LinearMemoryAttention(hidden_size=256, num_heads=4, normalize_qkv=True)
+        x = torch.randn(2, 32, 256) * 10
+
+        output = attn(x)
+
+        assert not torch.isnan(output).any()
+        assert not torch.isinf(output).any()
+
+    def test_many_updates_stability(self):
+        """Memory should remain stable after many updates."""
+        attn = LinearMemoryAttention(hidden_size=256, num_heads=4)
+
+        for _ in range(100):
+            x = torch.randn(2, 32, 256)
+            output = attn(x)
+
+        assert not torch.isnan(output).any()
+        assert not torch.isinf(output).any()
+
+        # Memory values should be bounded
+        for m in attn.memory.memories:
+            assert not torch.isnan(m.M).any()
+            assert not torch.isinf(m.M).any()
+            assert m.M.abs().max() <= m.max_memory
+
+    def test_clamping_prevents_explosion(self):
+        """Clamping should prevent memory explosion."""
+        from tensor_mem import TensorMemory
+
+        memory = TensorMemory(dim=64, max_delta=1.0, max_memory=10.0, max_norm=100.0)
+        memory.reset()
+
+        # Repeatedly update with large values
+        for _ in range(50):
+            keys = torch.randn(2, 100, 64) * 5
+            values = torch.randn(2, 100, 64) * 5
+            memory.update(keys, values)
+
+        # Memory should be bounded
+        assert memory.M.abs().max() <= memory.max_memory
+        assert memory.z.max() <= memory.max_norm
+        assert not torch.isnan(memory.M).any()
+        assert not torch.isinf(memory.M).any()

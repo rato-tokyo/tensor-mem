@@ -146,7 +146,7 @@ class LinearMemoryAttention(nn.Module):
         denominator = torch.einsum("bhsd,bhsd->bhs", q, cumsum_k)
 
         # Normalize
-        output = numerator / (denominator.unsqueeze(-1) + self.eps)
+        output: torch.Tensor = numerator / (denominator.unsqueeze(-1) + self.eps)
 
         return output
 

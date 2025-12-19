@@ -8,6 +8,12 @@ Usage:
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+# Add project root to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import torch
 
 from baseline import create_standard_transformer_lm

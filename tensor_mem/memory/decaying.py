@@ -5,6 +5,7 @@ from __future__ import annotations
 import torch
 
 from .base import BaseTensorMemory
+from .config import DecayingMemoryConfig
 
 
 class DecayingTensorMemory(BaseTensorMemory):
@@ -27,17 +28,14 @@ class DecayingTensorMemory(BaseTensorMemory):
         - decay = 0.9: Medium decay
         - decay = 0.5: Fast decay, short memory
 
-    Args:
-        dim: Dimension of the memory vectors.
-        decay: Decay factor in range (0, 1). Higher = longer memory.
-        eps: Small constant for numerical stability.
-        use_delta_rule: Whether to use Delta Rule for updates.
-        max_delta: Maximum absolute value for update deltas.
-        max_memory: Maximum absolute value for memory matrix M.
-        max_norm: Maximum value for normalization term z.
+    Uses config-based initialization - no default arguments.
 
     Example:
-        >>> memory = DecayingTensorMemory(dim=64, decay=0.95)
+        >>> from tensor_mem.memory.config import DecayingMemoryConfig
+        >>> config = DecayingMemoryConfig(dim=64, eps=1e-6, use_delta_rule=False,
+        ...                               max_delta=10.0, max_memory=100.0,
+        ...                               max_norm=1000.0, decay=0.95)
+        >>> memory = DecayingTensorMemory(config)
         >>> memory.reset(device="cuda", dtype=torch.float16)
         >>>
         >>> # Old information gradually fades with each update
@@ -46,29 +44,20 @@ class DecayingTensorMemory(BaseTensorMemory):
         ...     output = memory.retrieve(queries)
     """
 
-    def __init__(
-        self,
-        dim: int,
-        decay: float = 0.95,
-        eps: float = 1e-6,
-        use_delta_rule: bool = False,
-        max_delta: float = 10.0,
-        max_memory: float = 100.0,
-        max_norm: float = 1000.0,
-    ) -> None:
-        """Initialize DecayingTensorMemory."""
-        if not 0.0 < decay < 1.0:
-            raise ValueError(f"decay must be in range (0, 1), got {decay}")
+    def __init__(self, config: DecayingMemoryConfig) -> None:
+        """Initialize DecayingTensorMemory.
 
-        super().__init__(
-            dim=dim,
-            eps=eps,
-            use_delta_rule=use_delta_rule,
-            max_delta=max_delta,
-            max_memory=max_memory,
-            max_norm=max_norm,
-        )
-        self.decay = decay
+        Args:
+            config: DecayingMemoryConfig containing all memory settings including decay.
+
+        Raises:
+            ValueError: If decay is not in range (0, 1).
+        """
+        if not 0.0 < config.decay < 1.0:
+            raise ValueError(f"decay must be in range (0, 1), got {config.decay}")
+
+        super().__init__(config)
+        self.decay = config.decay
 
     def update(
         self,
@@ -93,6 +82,8 @@ class DecayingTensorMemory(BaseTensorMemory):
 
         self._clamp_memory()
 
-    def extra_repr(self) -> str:
-        """Return extra representation string."""
-        return f"dim={self._dim}, decay={self.decay}, eps={self.eps}"
+    def _extra_repr_fields(self) -> list[str]:
+        """Return list of field strings for extra_repr."""
+        fields = super()._extra_repr_fields()
+        fields.insert(1, f"decay={self.decay}")
+        return fields

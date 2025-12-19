@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 
 from ..utils import elu_plus_one
+from .config import MemoryConfig
 
 
 class BaseTensorMemory(nn.Module, ABC):
@@ -30,32 +31,22 @@ class BaseTensorMemory(nn.Module, ABC):
 
     Where σ = ELU + 1 activation function.
 
-    Args:
-        dim: Dimension of the memory vectors.
-        eps: Small constant for numerical stability.
-        use_delta_rule: Whether to use Delta Rule for updates.
-        max_delta: Maximum absolute value for update deltas.
-        max_memory: Maximum absolute value for memory matrix M.
-        max_norm: Maximum value for normalization term z.
+    Uses config-based initialization - no default arguments.
     """
 
-    def __init__(
-        self,
-        dim: int,
-        eps: float = 1e-6,
-        use_delta_rule: bool = False,
-        max_delta: float = 10.0,
-        max_memory: float = 100.0,
-        max_norm: float = 1000.0,
-    ) -> None:
-        """Initialize BaseTensorMemory."""
+    def __init__(self, config: MemoryConfig) -> None:
+        """Initialize BaseTensorMemory.
+
+        Args:
+            config: MemoryConfig containing all memory settings.
+        """
         super().__init__()
-        self._dim = dim
-        self.eps = eps
-        self.use_delta_rule = use_delta_rule
-        self.max_delta = max_delta
-        self.max_memory = max_memory
-        self.max_norm = max_norm
+        self._dim = config.dim
+        self.eps = config.eps
+        self.use_delta_rule = config.use_delta_rule
+        self.max_delta = config.max_delta
+        self.max_memory = config.max_memory
+        self.max_norm = config.max_norm
 
         self.register_buffer("M", None, persistent=False)
         self.register_buffer("z", None, persistent=False)
@@ -219,3 +210,14 @@ class BaseTensorMemory(nn.Module, ABC):
             existing = self._retrieve_from_memory(sigma_k)
             return values - existing
         return values
+
+    def _extra_repr_fields(self) -> list[str]:
+        """Return list of field strings for extra_repr.
+
+        Subclasses can override to add additional fields.
+        """
+        return [f"dim={self._dim}", f"eps={self.eps}"]
+
+    def extra_repr(self) -> str:
+        """Return extra representation string."""
+        return ", ".join(self._extra_repr_fields())

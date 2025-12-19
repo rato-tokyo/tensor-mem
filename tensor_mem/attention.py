@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as f
+import torch.nn.functional as F
 
 from .memory import MultiHeadMemory
 
@@ -114,9 +114,9 @@ class LinearMemoryAttention(nn.Module):
 
         # Optional L2 normalization for numerical stability (recommended for fp16)
         if self.normalize_qkv:
-            q = f.normalize(q, p=2, dim=-1)
-            k = f.normalize(k, p=2, dim=-1)
-            v = f.normalize(v, p=2, dim=-1)
+            q = F.normalize(q, p=2, dim=-1)
+            k = F.normalize(k, p=2, dim=-1)
+            v = F.normalize(v, p=2, dim=-1)
 
         # Split into heads: [batch, seq, num_heads * head_dim] -> [batch, num_heads, seq, head_dim]
         q = q.view(batch, seq_len, self.num_heads, self.head_dim).transpose(1, 2)

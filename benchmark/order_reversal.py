@@ -9,15 +9,11 @@ from dataclasses import dataclass
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as f
+import torch.nn.functional as F
 
-
-class LMProtocol:
-    """Protocol for language models that can return hidden states."""
-
-    def get_hidden_states(self, input_ids: torch.Tensor) -> torch.Tensor:
-        """Get hidden states for input tokens."""
-        raise NotImplementedError
+# Special token constants
+PAD_TOKEN = "<pad>"
+UNK_TOKEN = "<unk>"
 
 
 @dataclass(frozen=True)
@@ -88,7 +84,7 @@ class OrderReversalBenchmark:
     A NoPE model may produce identical outputs (similarity = 1.0).
     """
 
-    def __init__(self, config: BenchmarkConfig | None = None):
+    def __init__(self, config: BenchmarkConfig | None = None) -> None:
         """Initialize the benchmark.
 
         Args:
@@ -110,7 +106,7 @@ class OrderReversalBenchmark:
             tokens.add(v)
             tokens.add(o)
 
-        vocab = {"<pad>": 0, "<unk>": 1}
+        vocab = {PAD_TOKEN: 0, UNK_TOKEN: 1}
         for i, token in enumerate(sorted(tokens)):
             vocab[token] = i + 2
 
@@ -118,7 +114,7 @@ class OrderReversalBenchmark:
 
     def _tokenize(self, words: list[str]) -> torch.Tensor:
         """Convert words to token IDs."""
-        ids = [self.vocab.get(w, self.vocab["<unk>"]) for w in words]
+        ids = [self.vocab.get(w, self.vocab[UNK_TOKEN]) for w in words]
         return torch.tensor(ids, dtype=torch.long)
 
     def _cosine_similarity(
@@ -129,7 +125,7 @@ class OrderReversalBenchmark:
         """Compute cosine similarity between sequence representations."""
         vec1 = hidden1.mean(dim=1)
         vec2 = hidden2.mean(dim=1)
-        sim = f.cosine_similarity(vec1, vec2, dim=-1)
+        sim = F.cosine_similarity(vec1, vec2, dim=-1)
         return sim.mean().item()
 
     @torch.no_grad()

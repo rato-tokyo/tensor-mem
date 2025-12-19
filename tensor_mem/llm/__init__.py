@@ -11,9 +11,7 @@ from __future__ import annotations
 
 from tensor_mem.llm.config import (
     AttentionConfig,
-    DecayingMemoryConfig,
     LMConfig,
-    MemoryConfig,
     TransformerBlockConfig,
     large_config,
     medium_config,
@@ -28,9 +26,7 @@ from tensor_mem.llm.models import (
 __all__ = [
     # Config classes
     "AttentionConfig",
-    "DecayingMemoryConfig",
     "LMConfig",
-    "MemoryConfig",
     "TransformerBlockConfig",
     # Preset configs
     "large_config",

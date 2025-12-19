@@ -8,30 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-
-@dataclass(frozen=True)
-class MemoryConfig:
-    """Configuration for TensorMemory / DecayingTensorMemory.
-
-    All fields are required - no defaults.
-    """
-
-    dim: int
-    eps: float
-    use_delta_rule: bool
-    max_delta: float
-    max_memory: float
-    max_norm: float
-
-
-@dataclass(frozen=True)
-class DecayingMemoryConfig(MemoryConfig):
-    """Configuration for DecayingTensorMemory.
-
-    Extends MemoryConfig with decay parameter.
-    """
-
-    decay: float
+from tensor_mem.memory.config import DecayingMemoryConfig, MemoryConfig
 
 
 @dataclass(frozen=True)
@@ -114,7 +91,9 @@ _DECAYING_MEMORY_CONFIG = DecayingMemoryConfig(
 )
 
 
-def _get_memory_config(memory_type: Literal["standard", "decaying"]) -> MemoryConfig | DecayingMemoryConfig:
+def _get_memory_config(
+    memory_type: Literal["standard", "decaying"],
+) -> MemoryConfig | DecayingMemoryConfig:
     """Get memory config by type."""
     if memory_type == "standard":
         return _STANDARD_MEMORY_CONFIG

@@ -10,11 +10,13 @@ import math
 import torch
 import torch.nn as nn
 
+from .config import StandardTransformerConfig
+
 
 class SinusoidalPositionalEncoding(nn.Module):
     """Sinusoidal positional encoding from 'Attention Is All You Need'."""
 
-    def __init__(self, d_model: int, max_len: int, dropout: float):
+    def __init__(self, d_model: int, max_len: int, dropout: float) -> None:
         super().__init__()
         self.dropout = nn.Dropout(p=dropout)
 
@@ -35,7 +37,7 @@ class SinusoidalPositionalEncoding(nn.Module):
 class StandardTransformerBlock(nn.Module):
     """Standard transformer block with multi-head self-attention."""
 
-    def __init__(self, d_model: int, num_heads: int, d_ff: int, dropout: float):
+    def __init__(self, d_model: int, num_heads: int, d_ff: int, dropout: float) -> None:
         super().__init__()
         self.attention = nn.MultiheadAttention(
             embed_dim=d_model,
@@ -73,30 +75,35 @@ class StandardTransformerLM(nn.Module):
 
     This serves as the baseline for comparison with tensor memory LLM.
     Uses sinusoidal positional encoding and standard softmax attention.
+
+    Uses config-based initialization - no default arguments.
     """
 
-    def __init__(
-        self,
-        vocab_size: int,
-        d_model: int,
-        num_heads: int,
-        num_layers: int,
-        d_ff: int,
-        max_len: int,
-        dropout: float,
-    ):
+    def __init__(self, config: StandardTransformerConfig) -> None:
+        """Initialize StandardTransformerLM.
+
+        Args:
+            config: StandardTransformerConfig containing all model settings.
+        """
         super().__init__()
-        self.d_model = d_model
+        self.d_model = config.d_model
 
-        self.embedding = nn.Embedding(vocab_size, d_model)
-        self.pos_encoding = SinusoidalPositionalEncoding(d_model, max_len, dropout)
-
-        self.layers = nn.ModuleList(
-            [StandardTransformerBlock(d_model, num_heads, d_ff, dropout) for _ in range(num_layers)]
+        self.embedding = nn.Embedding(config.vocab_size, config.d_model)
+        self.pos_encoding = SinusoidalPositionalEncoding(
+            config.d_model, config.max_len, config.dropout
         )
 
-        self.norm = nn.LayerNorm(d_model)
-        self.lm_head = nn.Linear(d_model, vocab_size, bias=False)
+        self.layers = nn.ModuleList(
+            [
+                StandardTransformerBlock(
+                    config.d_model, config.num_heads, config.d_ff, config.dropout
+                )
+                for _ in range(config.num_layers)
+            ]
+        )
+
+        self.norm = nn.LayerNorm(config.d_model)
+        self.lm_head = nn.Linear(config.d_model, config.vocab_size, bias=False)
         self.lm_head.weight = self.embedding.weight
 
     def forward(
@@ -124,35 +131,13 @@ class StandardTransformerLM(nn.Module):
         return hidden
 
 
-def create_standard_transformer_lm(
-    vocab_size: int,
-    d_model: int,
-    num_heads: int,
-    num_layers: int,
-    d_ff: int,
-    max_len: int,
-    dropout: float,
-) -> StandardTransformerLM:
-    """Factory function to create StandardTransformerLM.
+def create_standard_transformer_lm(config: StandardTransformerConfig) -> StandardTransformerLM:
+    """Factory function to create StandardTransformerLM from config.
 
     Args:
-        vocab_size: Vocabulary size
-        d_model: Model dimension
-        num_heads: Number of attention heads
-        num_layers: Number of layers
-        d_ff: Feed-forward dimension
-        max_len: Maximum sequence length
-        dropout: Dropout rate
+        config: StandardTransformerConfig containing all model settings.
 
     Returns:
         Configured StandardTransformerLM instance
     """
-    return StandardTransformerLM(
-        vocab_size=vocab_size,
-        d_model=d_model,
-        num_heads=num_heads,
-        num_layers=num_layers,
-        d_ff=d_ff,
-        max_len=max_len,
-        dropout=dropout,
-    )
+    return StandardTransformerLM(config)

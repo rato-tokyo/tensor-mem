@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import torch
-import torch.nn.functional as f
+import torch.nn.functional as F
 
 
 def elu_plus_one(x: torch.Tensor) -> torch.Tensor:
@@ -22,4 +22,4 @@ def elu_plus_one(x: torch.Tensor) -> torch.Tensor:
     Returns:
         Activated tensor with same shape, all values positive.
     """
-    return f.elu(x) + 1.0
+    return F.elu(x) + 1.0

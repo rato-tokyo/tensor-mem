@@ -5,6 +5,7 @@ from __future__ import annotations
 import torch
 
 from .base import BaseTensorMemory
+from .config import MemoryConfig
 
 
 class TensorMemory(BaseTensorMemory):
@@ -34,16 +35,13 @@ class TensorMemory(BaseTensorMemory):
 
     For multi-head attention, create multiple TensorMemory instances.
 
-    Args:
-        dim: Dimension of the memory vectors.
-        eps: Small constant for numerical stability.
-        use_delta_rule: Whether to use Delta Rule for updates.
-        max_delta: Maximum absolute value for update deltas (prevents overflow).
-        max_memory: Maximum absolute value for memory matrix M.
-        max_norm: Maximum value for normalization term z.
+    Uses config-based initialization - no default arguments.
 
     Example:
-        >>> memory = TensorMemory(dim=64)
+        >>> from tensor_mem.memory.config import MemoryConfig
+        >>> config = MemoryConfig(dim=64, eps=1e-6, use_delta_rule=False,
+        ...                       max_delta=10.0, max_memory=100.0, max_norm=1000.0)
+        >>> memory = TensorMemory(config)
         >>> memory.reset(device="cuda", dtype=torch.float16)
         >>>
         >>> keys = torch.randn(4, 128, 64, device="cuda", dtype=torch.float16)
@@ -53,6 +51,14 @@ class TensorMemory(BaseTensorMemory):
         >>> queries = torch.randn(4, 32, 64, device="cuda", dtype=torch.float16)
         >>> output = memory.retrieve(queries)  # [4, 32, 64]
     """
+
+    def __init__(self, config: MemoryConfig) -> None:
+        """Initialize TensorMemory.
+
+        Args:
+            config: MemoryConfig containing all memory settings.
+        """
+        super().__init__(config)
 
     def update(
         self,
@@ -76,7 +82,3 @@ class TensorMemory(BaseTensorMemory):
         self.z = self.z + delta_z
 
         self._clamp_memory()
-
-    def extra_repr(self) -> str:
-        """Return extra representation string."""
-        return f"dim={self._dim}, eps={self.eps}"

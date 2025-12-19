@@ -13,8 +13,9 @@ import torch.nn as nn
 
 from tensor_mem.attention import LinearMemoryAttention
 from tensor_mem.memory import DecayingTensorMemory, MultiHeadMemory, TensorMemory
+from tensor_mem.memory.config import DecayingMemoryConfig, MemoryConfig
 
-from .config import DecayingMemoryConfig, LMConfig
+from .config import LMConfig
 
 
 class TensorMemoryBlock(nn.Module):
@@ -23,7 +24,7 @@ class TensorMemoryBlock(nn.Module):
     Uses Dependency Injection - receives a pre-configured LinearMemoryAttention.
     """
 
-    def __init__(self, attention: LinearMemoryAttention, d_ff: int, dropout: float):
+    def __init__(self, attention: LinearMemoryAttention, d_ff: int, dropout: float) -> None:
         super().__init__()
         self.attention = attention
         d_model = attention.hidden_size
@@ -57,7 +58,7 @@ class TensorMemoryLM(nn.Module):
     Uses Dependency Injection - receives pre-configured layer blocks.
     """
 
-    def __init__(self, vocab_size: int, layers: list[TensorMemoryBlock], dropout: float):
+    def __init__(self, vocab_size: int, layers: list[TensorMemoryBlock], dropout: float) -> None:
         super().__init__()
 
         if not layers:
@@ -105,6 +106,53 @@ class TensorMemoryLM(nn.Module):
             layer.reset_memory()
 
 
+def _create_memories_for_layer(
+    memory_config: MemoryConfig | DecayingMemoryConfig,
+    num_heads: int,
+) -> list[TensorMemory | DecayingTensorMemory]:
+    """Create memory instances for a single layer.
+
+    Args:
+        memory_config: Memory configuration.
+        num_heads: Number of attention heads.
+
+    Returns:
+        List of memory instances for the layer.
+    """
+    if isinstance(memory_config, DecayingMemoryConfig):
+        return [DecayingTensorMemory(memory_config) for _ in range(num_heads)]
+    return [TensorMemory(memory_config) for _ in range(num_heads)]
+
+
+def _create_attention_block(
+    memories: list[TensorMemory | DecayingTensorMemory],
+    config: LMConfig,
+) -> TensorMemoryBlock:
+    """Create a TensorMemoryBlock with the given memories.
+
+    Args:
+        memories: List of memory instances for the layer.
+        config: LMConfig containing attention and block settings.
+
+    Returns:
+        Configured TensorMemoryBlock instance.
+    """
+    mh_memory = MultiHeadMemory(memories)
+
+    attention = LinearMemoryAttention(
+        memory=mh_memory,
+        hidden_size=config.attention.hidden_size,
+        bias=config.attention.bias,
+        normalize_qkv=config.attention.normalize_qkv,
+    )
+
+    return TensorMemoryBlock(
+        attention=attention,
+        d_ff=config.block.d_ff,
+        dropout=config.block.dropout,
+    )
+
+
 def create_tensor_memory_lm(config: LMConfig) -> TensorMemoryLM:
     """Factory function to create TensorMemoryLM from config.
 
@@ -114,54 +162,13 @@ def create_tensor_memory_lm(config: LMConfig) -> TensorMemoryLM:
     Returns:
         Configured TensorMemoryLM instance
     """
-    layers = []
-    for _ in range(config.num_layers):
-        # 1. Create memory instances based on config type
-        if isinstance(config.memory, DecayingMemoryConfig):
-            memories: list[TensorMemory | DecayingTensorMemory] = [
-                DecayingTensorMemory(
-                    dim=config.memory.dim,
-                    decay=config.memory.decay,
-                    eps=config.memory.eps,
-                    use_delta_rule=config.memory.use_delta_rule,
-                    max_delta=config.memory.max_delta,
-                    max_memory=config.memory.max_memory,
-                    max_norm=config.memory.max_norm,
-                )
-                for _ in range(config.num_heads)
-            ]
-        else:
-            memories = [
-                TensorMemory(
-                    dim=config.memory.dim,
-                    eps=config.memory.eps,
-                    use_delta_rule=config.memory.use_delta_rule,
-                    max_delta=config.memory.max_delta,
-                    max_memory=config.memory.max_memory,
-                    max_norm=config.memory.max_norm,
-                )
-                for _ in range(config.num_heads)
-            ]
-
-        # 2. Create MultiHeadMemory
-        mh_memory = MultiHeadMemory(memories)
-
-        # 3. Create LinearMemoryAttention
-        attention = LinearMemoryAttention(
-            memory=mh_memory,
-            hidden_size=config.attention.hidden_size,
-            bias=config.attention.bias,
-            normalize_qkv=config.attention.normalize_qkv,
+    layers = [
+        _create_attention_block(
+            _create_memories_for_layer(config.memory, config.num_heads),
+            config,
         )
-
-        # 4. Create TensorMemoryBlock
-        block = TensorMemoryBlock(
-            attention=attention,
-            d_ff=config.block.d_ff,
-            dropout=config.block.dropout,
-        )
-
-        layers.append(block)
+        for _ in range(config.num_layers)
+    ]
 
     return TensorMemoryLM(
         vocab_size=config.vocab_size,

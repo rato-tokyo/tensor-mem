@@ -9,9 +9,7 @@ This package provides:
 from .attention import LinearMemoryAttention
 from .llm import (
     AttentionConfig,
-    DecayingMemoryConfig,
     LMConfig,
-    MemoryConfig,
     TensorMemoryBlock,
     TensorMemoryLM,
     TransformerBlockConfig,
@@ -20,7 +18,16 @@ from .llm import (
     medium_config,
     small_config,
 )
-from .memory import BaseTensorMemory, DecayingTensorMemory, MultiHeadMemory, TensorMemory
+from .memory import (
+    BaseTensorMemory,
+    DecayingMemoryConfig,
+    DecayingTensorMemory,
+    MemoryConfig,
+    MultiHeadMemory,
+    TensorMemory,
+    default_decaying_memory_config,
+    default_memory_config,
+)
 
 __all__ = [
     # Memory classes
@@ -28,16 +35,19 @@ __all__ = [
     "TensorMemory",
     "DecayingTensorMemory",
     "MultiHeadMemory",
+    # Memory config classes
+    "MemoryConfig",
+    "DecayingMemoryConfig",
+    "default_memory_config",
+    "default_decaying_memory_config",
     # Attention
     "LinearMemoryAttention",
     # LLM classes
     "TensorMemoryBlock",
     "TensorMemoryLM",
-    # Config classes
+    # LLM Config classes
     "AttentionConfig",
-    "DecayingMemoryConfig",
     "LMConfig",
-    "MemoryConfig",
     "TransformerBlockConfig",
     # Preset configs
     "large_config",

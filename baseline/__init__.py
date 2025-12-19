@@ -6,12 +6,15 @@ This module provides:
 
 from __future__ import annotations
 
+from baseline.config import StandardTransformerConfig
 from baseline.models import (
     StandardTransformerLM,
     create_standard_transformer_lm,
 )
 
 __all__ = [
+    # Config classes
+    "StandardTransformerConfig",
     # Model classes
     "StandardTransformerLM",
     # Factory functions

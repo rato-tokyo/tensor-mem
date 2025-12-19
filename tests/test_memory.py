@@ -4,6 +4,73 @@ import pytest
 import torch
 
 from tensor_mem import DecayingTensorMemory, MultiHeadMemory, TensorMemory
+from tensor_mem.memory.config import DecayingMemoryConfig, MemoryConfig
+
+
+def default_config(dim: int = 64) -> MemoryConfig:
+    """Create default memory config for tests."""
+    return MemoryConfig(
+        dim=dim,
+        eps=1e-6,
+        use_delta_rule=False,
+        max_delta=10.0,
+        max_memory=100.0,
+        max_norm=1000.0,
+    )
+
+
+def delta_rule_config(dim: int = 64) -> MemoryConfig:
+    """Create config with delta rule enabled."""
+    return MemoryConfig(
+        dim=dim,
+        eps=1e-6,
+        use_delta_rule=True,
+        max_delta=10.0,
+        max_memory=100.0,
+        max_norm=1000.0,
+    )
+
+
+def custom_eps_config(dim: int = 64, eps: float = 1e-8) -> MemoryConfig:
+    """Create config with custom epsilon."""
+    return MemoryConfig(
+        dim=dim,
+        eps=eps,
+        use_delta_rule=False,
+        max_delta=10.0,
+        max_memory=100.0,
+        max_norm=1000.0,
+    )
+
+
+def custom_clamp_config(
+    dim: int = 64,
+    max_delta: float = 1.0,
+    max_memory: float = 10.0,
+    max_norm: float = 100.0,
+) -> MemoryConfig:
+    """Create config with custom clamping values."""
+    return MemoryConfig(
+        dim=dim,
+        eps=1e-6,
+        use_delta_rule=False,
+        max_delta=max_delta,
+        max_memory=max_memory,
+        max_norm=max_norm,
+    )
+
+
+def decaying_config(dim: int = 64, decay: float = 0.95) -> DecayingMemoryConfig:
+    """Create default decaying memory config for tests."""
+    return DecayingMemoryConfig(
+        dim=dim,
+        eps=1e-6,
+        use_delta_rule=False,
+        max_delta=10.0,
+        max_memory=100.0,
+        max_norm=1000.0,
+        decay=decay,
+    )
 
 
 class TestTensorMemoryInit:
@@ -11,37 +78,37 @@ class TestTensorMemoryInit:
 
     def test_basic_init(self):
         """Test basic initialization."""
-        memory = TensorMemory(dim=64)
+        memory = TensorMemory(default_config(64))
         assert memory.dim == 64
         assert memory.eps == 1e-6
 
     def test_custom_eps(self):
         """Test custom epsilon value."""
-        memory = TensorMemory(dim=64, eps=1e-8)
+        memory = TensorMemory(custom_eps_config(64, 1e-8))
         assert memory.eps == 1e-8
 
     def test_delta_rule_init(self):
         """Test delta rule initialization."""
-        memory = TensorMemory(dim=64, use_delta_rule=True)
+        memory = TensorMemory(delta_rule_config(64))
         assert memory.use_delta_rule is True
 
-        memory2 = TensorMemory(dim=64)
+        memory2 = TensorMemory(default_config(64))
         assert memory2.use_delta_rule is False
 
     def test_not_initialized_before_reset(self):
         """Memory should not be initialized before reset."""
-        memory = TensorMemory(dim=64)
+        memory = TensorMemory(default_config(64))
         assert not memory.is_initialized
 
     def test_initialized_after_reset(self):
         """Memory should be initialized after reset."""
-        memory = TensorMemory(dim=64)
+        memory = TensorMemory(default_config(64))
         memory.reset()
         assert memory.is_initialized
 
     def test_empty_after_reset(self):
         """Memory should be empty after reset."""
-        memory = TensorMemory(dim=64)
+        memory = TensorMemory(default_config(64))
         memory.reset()
         assert memory.is_empty
 
@@ -52,7 +119,7 @@ class TestTensorMemoryReset:
     def test_reset_creates_correct_shapes(self):
         """Reset should create tensors with correct shapes."""
         dim = 64
-        memory = TensorMemory(dim=dim)
+        memory = TensorMemory(default_config(dim))
         memory.reset()
 
         assert memory.M.shape == (dim, dim)
@@ -60,7 +127,7 @@ class TestTensorMemoryReset:
 
     def test_reset_creates_zeros(self):
         """Reset should create zero tensors."""
-        memory = TensorMemory(dim=64)
+        memory = TensorMemory(default_config(64))
         memory.reset()
 
         assert (memory.M == 0).all()
@@ -68,7 +135,7 @@ class TestTensorMemoryReset:
 
     def test_reset_respects_device(self):
         """Reset should place tensors on specified device."""
-        memory = TensorMemory(dim=64)
+        memory = TensorMemory(default_config(64))
         memory.reset(device="cpu")
 
         assert memory.M.device.type == "cpu"
@@ -76,7 +143,7 @@ class TestTensorMemoryReset:
 
     def test_reset_respects_dtype(self):
         """Reset should use specified dtype."""
-        memory = TensorMemory(dim=64)
+        memory = TensorMemory(default_config(64))
         memory.reset(dtype=torch.float64)
 
         assert memory.M.dtype == torch.float64
@@ -88,7 +155,7 @@ class TestTensorMemoryUpdate:
 
     def test_update_without_init_raises(self):
         """Update should raise error if memory not initialized."""
-        memory = TensorMemory(dim=64)
+        memory = TensorMemory(default_config(64))
         keys = torch.randn(2, 10, 64)
         values = torch.randn(2, 10, 64)
 
@@ -97,7 +164,7 @@ class TestTensorMemoryUpdate:
 
     def test_update_makes_memory_non_empty(self):
         """Update should make memory non-empty."""
-        memory = TensorMemory(dim=64)
+        memory = TensorMemory(default_config(64))
         memory.reset()
 
         keys = torch.randn(2, 10, 64)
@@ -108,7 +175,7 @@ class TestTensorMemoryUpdate:
 
     def test_update_changes_memory(self):
         """Update should change memory state."""
-        memory = TensorMemory(dim=64)
+        memory = TensorMemory(default_config(64))
         memory.reset()
 
         m_before = memory.M.clone()
@@ -123,7 +190,7 @@ class TestTensorMemoryUpdate:
 
     def test_update_accumulates(self):
         """Multiple updates should accumulate."""
-        memory = TensorMemory(dim=64)
+        memory = TensorMemory(default_config(64))
         memory.reset()
 
         for _ in range(3):
@@ -135,7 +202,7 @@ class TestTensorMemoryUpdate:
 
     def test_delta_rule_update(self):
         """Delta rule should subtract existing bindings."""
-        memory = TensorMemory(dim=64, use_delta_rule=True)
+        memory = TensorMemory(delta_rule_config(64))
         memory.reset()
 
         keys = torch.randn(2, 10, 64)
@@ -156,8 +223,8 @@ class TestTensorMemoryUpdate:
         """Delta rule should produce different results than normal update."""
         torch.manual_seed(42)
 
-        memory_normal = TensorMemory(dim=64, use_delta_rule=False)
-        memory_delta = TensorMemory(dim=64, use_delta_rule=True)
+        memory_normal = TensorMemory(default_config(64))
+        memory_delta = TensorMemory(delta_rule_config(64))
         memory_normal.reset()
         memory_delta.reset()
 
@@ -180,7 +247,7 @@ class TestTensorMemoryRetrieve:
 
     def test_retrieve_without_init_raises(self):
         """Retrieve should raise error if memory not initialized."""
-        memory = TensorMemory(dim=64)
+        memory = TensorMemory(default_config(64))
         queries = torch.randn(2, 10, 64)
 
         with pytest.raises(RuntimeError, match="not initialized"):
@@ -188,7 +255,7 @@ class TestTensorMemoryRetrieve:
 
     def test_retrieve_returns_correct_shape(self):
         """Retrieve should return correct output shape."""
-        memory = TensorMemory(dim=64)
+        memory = TensorMemory(default_config(64))
         memory.reset()
 
         keys = torch.randn(2, 10, 64)
@@ -202,7 +269,7 @@ class TestTensorMemoryRetrieve:
 
     def test_retrieve_from_empty_memory(self):
         """Retrieve from empty memory should not crash."""
-        memory = TensorMemory(dim=64)
+        memory = TensorMemory(default_config(64))
         memory.reset()
 
         queries = torch.randn(2, 10, 64)
@@ -213,7 +280,7 @@ class TestTensorMemoryRetrieve:
 
     def test_retrieve_no_nan(self):
         """Retrieve should not produce NaN values."""
-        memory = TensorMemory(dim=64)
+        memory = TensorMemory(default_config(64))
         memory.reset()
 
         for _ in range(5):
@@ -233,7 +300,7 @@ class TestMultiHeadMemory:
 
     def test_basic_init(self):
         """Test basic initialization with injected memories."""
-        memories = [TensorMemory(dim=64) for _ in range(8)]
+        memories = [TensorMemory(default_config(64)) for _ in range(8)]
         mh = MultiHeadMemory(memories)
         assert mh.num_heads == 8
         assert mh.head_dim == 64
@@ -246,7 +313,7 @@ class TestMultiHeadMemory:
 
     def test_reset(self):
         """Test reset all memories."""
-        memories = [TensorMemory(dim=32) for _ in range(4)]
+        memories = [TensorMemory(default_config(32)) for _ in range(4)]
         mh = MultiHeadMemory(memories)
         mh.reset()
 
@@ -257,7 +324,7 @@ class TestMultiHeadMemory:
 
     def test_update_and_retrieve(self):
         """Test update and retrieve with multi-head."""
-        memories = [TensorMemory(dim=32) for _ in range(4)]
+        memories = [TensorMemory(default_config(32)) for _ in range(4)]
         mh = MultiHeadMemory(memories)
         mh.reset()
 
@@ -274,7 +341,7 @@ class TestMultiHeadMemory:
 
     def test_heads_are_independent(self):
         """Each head should have independent memory."""
-        memories = [TensorMemory(dim=32) for _ in range(4)]
+        memories = [TensorMemory(default_config(32)) for _ in range(4)]
         mh = MultiHeadMemory(memories)
         mh.reset()
 
@@ -295,7 +362,7 @@ class TestMultiHeadMemory:
     def test_custom_memory_class(self):
         """Test using DecayingTensorMemory with MultiHeadMemory."""
         # Create DecayingTensorMemory instances with DI pattern
-        memories = [DecayingTensorMemory(dim=32, decay=0.9) for _ in range(4)]
+        memories = [DecayingTensorMemory(decaying_config(32, 0.9)) for _ in range(4)]
         mh = MultiHeadMemory(memories)
         mh.reset()
 
@@ -318,7 +385,15 @@ class TestMultiHeadMemory:
     def test_memory_config_via_injection(self):
         """Test that memory config is set via injection."""
         # Create memories with specific config
-        memories = [TensorMemory(dim=16, eps=1e-8, use_delta_rule=True) for _ in range(2)]
+        config = MemoryConfig(
+            dim=16,
+            eps=1e-8,
+            use_delta_rule=True,
+            max_delta=10.0,
+            max_memory=100.0,
+            max_norm=1000.0,
+        )
+        memories = [TensorMemory(config) for _ in range(2)]
         mh = MultiHeadMemory(memories)
 
         for m in mh.memories:
@@ -332,7 +407,7 @@ class TestTensorMemoryIntegration:
     def test_full_workflow(self):
         """Test complete workflow."""
         dim = 64
-        memory = TensorMemory(dim=dim)
+        memory = TensorMemory(default_config(dim))
 
         # Initialize
         assert not memory.is_initialized
@@ -358,7 +433,7 @@ class TestTensorMemoryIntegration:
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
     def test_cuda_support(self):
         """Test that memory works on CUDA."""
-        memory = TensorMemory(dim=64)
+        memory = TensorMemory(default_config(64))
         memory.reset(device="cuda", dtype=torch.float16)
 
         keys = torch.randn(2, 10, 64, device="cuda", dtype=torch.float16)
@@ -377,38 +452,38 @@ class TestDecayingTensorMemoryInit:
 
     def test_basic_init(self):
         """Test basic initialization."""
-        memory = DecayingTensorMemory(dim=64)
+        memory = DecayingTensorMemory(decaying_config(64, 0.95))
         assert memory.dim == 64
         assert memory.decay == 0.95
         assert memory.eps == 1e-6
 
     def test_custom_decay(self):
         """Test custom decay value."""
-        memory = DecayingTensorMemory(dim=64, decay=0.9)
+        memory = DecayingTensorMemory(decaying_config(64, 0.9))
         assert memory.decay == 0.9
 
     def test_invalid_decay_raises(self):
         """Invalid decay values should raise error."""
         with pytest.raises(ValueError, match="decay must be in range"):
-            DecayingTensorMemory(dim=64, decay=0.0)
+            DecayingTensorMemory(decaying_config(64, 0.0))
 
         with pytest.raises(ValueError, match="decay must be in range"):
-            DecayingTensorMemory(dim=64, decay=1.0)
+            DecayingTensorMemory(decaying_config(64, 1.0))
 
         with pytest.raises(ValueError, match="decay must be in range"):
-            DecayingTensorMemory(dim=64, decay=1.5)
+            DecayingTensorMemory(decaying_config(64, 1.5))
 
         with pytest.raises(ValueError, match="decay must be in range"):
-            DecayingTensorMemory(dim=64, decay=-0.1)
+            DecayingTensorMemory(decaying_config(64, -0.1))
 
     def test_not_initialized_before_reset(self):
         """Memory should not be initialized before reset."""
-        memory = DecayingTensorMemory(dim=64)
+        memory = DecayingTensorMemory(decaying_config(64))
         assert not memory.is_initialized
 
     def test_initialized_after_reset(self):
         """Memory should be initialized after reset."""
-        memory = DecayingTensorMemory(dim=64)
+        memory = DecayingTensorMemory(decaying_config(64))
         memory.reset()
         assert memory.is_initialized
 
@@ -418,7 +493,7 @@ class TestDecayingTensorMemoryUpdate:
 
     def test_update_changes_memory(self):
         """Update should change memory state."""
-        memory = DecayingTensorMemory(dim=64, decay=0.9)
+        memory = DecayingTensorMemory(decaying_config(64, 0.9))
         memory.reset()
 
         m_before = memory.M.clone()
@@ -433,7 +508,7 @@ class TestDecayingTensorMemoryUpdate:
 
     def test_decay_reduces_old_information(self):
         """Old information should decay with each update."""
-        memory = DecayingTensorMemory(dim=64, decay=0.5)  # Fast decay
+        memory = DecayingTensorMemory(decaying_config(64, 0.5))  # Fast decay
         memory.reset()
 
         # First update
@@ -456,11 +531,11 @@ class TestDecayingTensorMemoryUpdate:
         torch.manual_seed(42)
 
         # High decay (slow forget)
-        memory_high = DecayingTensorMemory(dim=64, decay=0.99)
+        memory_high = DecayingTensorMemory(decaying_config(64, 0.99))
         memory_high.reset()
 
         # Low decay (fast forget)
-        memory_low = DecayingTensorMemory(dim=64, decay=0.5)
+        memory_low = DecayingTensorMemory(decaying_config(64, 0.5))
         memory_low.reset()
 
         # Same first update
@@ -490,7 +565,7 @@ class TestDecayingTensorMemoryUpdate:
 
     def test_memory_bounded_after_many_updates(self):
         """Memory should remain bounded after many updates."""
-        memory = DecayingTensorMemory(dim=64, decay=0.95)
+        memory = DecayingTensorMemory(decaying_config(64, 0.95))
         memory.reset()
 
         for _ in range(100):
@@ -509,7 +584,7 @@ class TestDecayingTensorMemoryRetrieve:
 
     def test_retrieve_returns_correct_shape(self):
         """Retrieve should return correct output shape."""
-        memory = DecayingTensorMemory(dim=64)
+        memory = DecayingTensorMemory(decaying_config(64))
         memory.reset()
 
         keys = torch.randn(2, 10, 64)
@@ -523,7 +598,7 @@ class TestDecayingTensorMemoryRetrieve:
 
     def test_retrieve_no_nan(self):
         """Retrieve should not produce NaN values."""
-        memory = DecayingTensorMemory(dim=64, decay=0.9)
+        memory = DecayingTensorMemory(decaying_config(64, 0.9))
         memory.reset()
 
         for _ in range(10):
@@ -545,7 +620,7 @@ class TestDecayingTensorMemoryVsTensorMemory:
         """Decaying memory should converge toward recent information."""
         torch.manual_seed(42)
 
-        memory = DecayingTensorMemory(dim=64, decay=0.5)
+        memory = DecayingTensorMemory(decaying_config(64, 0.5))
         memory.reset()
 
         # Many updates with same pattern
@@ -567,8 +642,8 @@ class TestDecayingTensorMemoryVsTensorMemory:
         """Normal TensorMemory accumulates while decaying stays bounded."""
         torch.manual_seed(42)
 
-        memory_normal = TensorMemory(dim=64)
-        memory_decaying = DecayingTensorMemory(dim=64, decay=0.9)
+        memory_normal = TensorMemory(default_config(64))
+        memory_decaying = DecayingTensorMemory(decaying_config(64, 0.9))
         memory_normal.reset()
         memory_decaying.reset()
 

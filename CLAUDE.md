@@ -288,6 +288,72 @@ layers = [Layer(...) for _ in range(args.num_layers)]
 
 CLIパラメータは設定を隠蔽し、Declarative Configurationの原則に違反する。
 
+## Global Variables for Configuration - IMMUTABLE RULE
+
+**設定とモデル定義はすべてグローバル変数で直接定義する。**
+
+このルールは削除・変更不可。クラスや関数でラップしない。
+
+### Correct Pattern (scripts/models.py)
+
+```python
+# 設定: 単純なグローバル変数
+DEVICE = "cuda"
+D_MODEL = 256
+NUM_HEADS = 4
+D_FF = 1024
+VOCAB_SIZE = 10000
+HEAD_DIM = D_MODEL // NUM_HEADS
+
+MAX_EPOCHS = 50
+PATIENCE = 2
+SEQ_LEN = 64
+BATCH_SIZE = 32
+LR = 1e-3
+
+# メモリ設定: グローバル変数
+MEMORY_CONFIG = MemoryConfig(
+    dim=HEAD_DIM,
+    eps=1e-6,
+    use_delta_rule=False,
+    max_delta=10.0,
+    max_memory=100.0,
+    max_norm=1000.0,
+)
+
+# モデル定義: グローバル変数（Declarative Configuration）
+TENSOR_MEMORY_MODEL = TensorMemoryLM(
+    vocab_size=VOCAB_SIZE,
+    layers=[
+        Layer([TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG), ...], ...),
+        Layer([TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG), ...], ...),
+        Layer([TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG), ...], ...),
+        Layer([TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG), ...], ...),
+    ],
+)
+```
+
+### Anti-pattern (NEVER do this)
+
+```python
+# BAD: dataclassで設定をラップ
+@dataclass
+class ExperimentConfig:
+    d_model: int = 256
+    ...
+
+# BAD: 関数でモデル生成
+def create_model(vocab_size: int) -> TensorMemoryLM:
+    ...
+
+# BAD: クラスで設定を管理
+class Config:
+    def __init__(self):
+        self.d_model = 256
+```
+
+クラスや関数は不要な抽象化。グローバル変数で直接定義すれば十分。
+
 ## Code Quality
 
 - Python 3.11 specific

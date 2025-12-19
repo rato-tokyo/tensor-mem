@@ -6,7 +6,6 @@ from dataclasses import dataclass
 
 import torch
 import torch.nn as nn
-
 from data import get_batch
 from training import TrainingResult
 

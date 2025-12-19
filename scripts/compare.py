@@ -19,16 +19,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import torch
-
 from analysis import ContextDependencyResult, analyze_context_dependency, print_results
 from data import batchify, build_vocab, download_wikitext2, tokenize
 from models import (
     BATCH_SIZE,
     CLIP,
-    DATA_FRACTION,
-    DEVICE,
     D_FF,
     D_MODEL,
+    DATA_FRACTION,
+    DEVICE,
     LR,
     MAX_EPOCHS,
     NUM_HEADS,
@@ -46,10 +45,7 @@ def main() -> None:
     """Main function."""
     device = torch.device(DEVICE)
     print(f"Device: {device}")
-    print(
-        f"Architecture: d_model={D_MODEL}, heads={NUM_HEADS}, "
-        f"layers={NUM_LAYERS}, d_ff={D_FF}"
-    )
+    print(f"Architecture: d_model={D_MODEL}, heads={NUM_HEADS}, layers={NUM_LAYERS}, d_ff={D_FF}")
     print(
         f"Training: max_epochs={MAX_EPOCHS}, patience={PATIENCE}, "
         f"seq_len={SEQ_LEN}, batch_size={BATCH_SIZE}"

@@ -9,7 +9,6 @@ from __future__ import annotations
 from baseline import StandardTransformerBlock, StandardTransformerLM
 from tensor_mem import Layer, MemoryConfig, TensorMemory, TensorMemoryLM
 
-
 # =============================================================================
 # Experiment Configuration
 # =============================================================================
@@ -55,28 +54,48 @@ TENSOR_MEMORY_MODEL = TensorMemoryLM(
     vocab_size=VOCAB_SIZE,
     layers=[
         Layer(
-            [TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG)],
+            [
+                TensorMemory(MEMORY_CONFIG),
+                TensorMemory(MEMORY_CONFIG),
+                TensorMemory(MEMORY_CONFIG),
+                TensorMemory(MEMORY_CONFIG),
+            ],
             hidden_size=D_MODEL,
             d_ff=D_FF,
             bias=True,
             normalize_qkv=False,
         ),
         Layer(
-            [TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG)],
+            [
+                TensorMemory(MEMORY_CONFIG),
+                TensorMemory(MEMORY_CONFIG),
+                TensorMemory(MEMORY_CONFIG),
+                TensorMemory(MEMORY_CONFIG),
+            ],
             hidden_size=D_MODEL,
             d_ff=D_FF,
             bias=True,
             normalize_qkv=False,
         ),
         Layer(
-            [TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG)],
+            [
+                TensorMemory(MEMORY_CONFIG),
+                TensorMemory(MEMORY_CONFIG),
+                TensorMemory(MEMORY_CONFIG),
+                TensorMemory(MEMORY_CONFIG),
+            ],
             hidden_size=D_MODEL,
             d_ff=D_FF,
             bias=True,
             normalize_qkv=False,
         ),
         Layer(
-            [TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG)],
+            [
+                TensorMemory(MEMORY_CONFIG),
+                TensorMemory(MEMORY_CONFIG),
+                TensorMemory(MEMORY_CONFIG),
+                TensorMemory(MEMORY_CONFIG),
+            ],
             hidden_size=D_MODEL,
             d_ff=D_FF,
             bias=True,

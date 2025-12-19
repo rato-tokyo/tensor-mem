@@ -94,6 +94,89 @@ class MultiHeadMemory:
         self.memories = [memory_class(dim=head_dim, **kwargs) for ...]
 ```
 
+## No Legacy Code Policy
+
+**Keeping old code for backward compatibility is strictly prohibited.**
+
+When refactoring or changing APIs:
+1. **Delete old implementations completely** - Do not keep deprecated methods/classes
+2. **No compatibility shims** - Do not add wrappers to support old APIs
+3. **No `# deprecated` comments** - Remove code instead of marking it
+4. **Update all usages** - Fix all call sites when changing interfaces
+5. **Clean tests** - Update tests to use new APIs, don't test old ones
+
+### Why?
+
+- Old code creates confusion about which API to use
+- Maintenance burden increases with duplicate code
+- Tests become unreliable when testing deprecated paths
+- New contributors may accidentally use old patterns
+
+### When Changing APIs
+
+```python
+# WRONG: Adding backward compatibility
+def old_method(self):  # deprecated
+    return self.new_method()
+
+# CORRECT: Remove old_method entirely, update all callers
+```
+
+## No Default Arguments Policy - IMMUTABLE RULE
+
+**Default arguments in function/method signatures are strictly prohibited.**
+
+This rule cannot be removed or modified. All parameters must be explicitly passed.
+
+### Why?
+
+1. **Explicit is better than implicit** - Callers must consciously choose all values
+2. **No hidden configuration** - All settings visible at call site
+3. **Prevents accidental misconfiguration** - No "I forgot to set X" bugs
+4. **Forces centralized config** - Settings defined in one place, not scattered in defaults
+
+### Correct Pattern
+
+```python
+# Configuration dataclass (single source of truth)
+@dataclass
+class MemoryConfig:
+    dim: int
+    eps: float
+    use_delta_rule: bool
+    max_delta: float
+    max_memory: float
+    max_norm: float
+
+# Class with no defaults - requires config
+class TensorMemory:
+    def __init__(self, config: MemoryConfig) -> None:
+        self.dim = config.dim
+        self.eps = config.eps
+        # ...
+```
+
+### Anti-pattern (NEVER do this)
+
+```python
+# BAD: Hidden defaults
+def __init__(self, dim: int, eps: float = 1e-6, use_delta_rule: bool = False):
+    ...
+
+# BAD: Optional with default None
+def __init__(self, config: Config | None = None):
+    if config is None:
+        config = Config()  # Hidden default!
+```
+
+### Exception
+
+Only `None` is allowed as default for truly optional parameters that change behavior:
+```python
+def reset(self, device: torch.device | None = None) -> None:
+    # None means "use current device" - not a hidden configuration
+```
+
 ## Code Quality
 
 - Python 3.11 specific

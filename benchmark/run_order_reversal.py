@@ -4,90 +4,50 @@
 Usage:
     python benchmark/run_order_reversal.py
     python benchmark/run_order_reversal.py --device cuda
-    python benchmark/run_order_reversal.py --d_model 512 --num_layers 6
 """
 
 from __future__ import annotations
 
-import argparse
-
 import torch
 
-from baseline.models import StandardTransformerLM, create_tensor_memory_lm
+from baseline import create_standard_transformer_lm, create_tensor_memory_lm, small_config
 from benchmark.order_reversal import OrderReversalBenchmark, print_comparison
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run order reversal benchmark for NoPE analysis")
-    parser.add_argument(
-        "--device",
-        type=str,
-        default="cpu",
-        help="Device to run on (cpu, cuda, mps)",
-    )
-    parser.add_argument(
-        "--d_model",
-        type=int,
-        default=256,
-        help="Model dimension",
-    )
-    parser.add_argument(
-        "--num_heads",
-        type=int,
-        default=4,
-        help="Number of attention heads",
-    )
-    parser.add_argument(
-        "--num_layers",
-        type=int,
-        default=4,
-        help="Number of transformer layers",
-    )
-    parser.add_argument(
-        "--d_ff",
-        type=int,
-        default=1024,
-        help="Feed-forward dimension",
-    )
-    parser.add_argument(
-        "--threshold",
-        type=float,
-        default=0.9,
-        help="Similarity threshold for distinguishability",
-    )
-    args = parser.parse_args()
-
-    # Setup
-    device = torch.device(args.device)
+    device = torch.device("cpu")
     print(f"Running on device: {device}")
 
     # Create benchmark
-    benchmark = OrderReversalBenchmark(similarity_threshold=args.threshold)
+    benchmark = OrderReversalBenchmark()
     vocab_size = len(benchmark.vocab)
 
     print(f"\nVocabulary size: {vocab_size}")
     print(f"Test triplets: {len(benchmark.triplets)}")
-    print(f"Model config: d_model={args.d_model}, heads={args.num_heads}, layers={args.num_layers}")
 
-    # Create models
+    # Create models using centralized config
     print("\nInitializing models...")
 
-    standard_model = StandardTransformerLM(
-        vocab_size=vocab_size,
-        d_model=args.d_model,
-        num_heads=args.num_heads,
-        num_layers=args.num_layers,
-        d_ff=args.d_ff,
+    # Get small config for TensorMemoryLM
+    config = small_config(vocab_size=vocab_size, memory_type="standard")
+
+    print(
+        f"Model config: d_model={config.d_model}, heads={config.num_heads}, layers={config.num_layers}"
     )
 
-    # Use factory function for TensorMemoryLM (DI pattern)
-    tensor_mem_model = create_tensor_memory_lm(
+    # Create standard transformer with explicit parameters
+    standard_model = create_standard_transformer_lm(
         vocab_size=vocab_size,
-        d_model=args.d_model,
-        num_heads=args.num_heads,
-        num_layers=args.num_layers,
-        d_ff=args.d_ff,
+        d_model=config.d_model,
+        num_heads=config.num_heads,
+        num_layers=config.num_layers,
+        d_ff=config.block.d_ff,
+        max_len=512,
+        dropout=config.dropout,
     )
+
+    # Create tensor memory LM from config
+    tensor_mem_model = create_tensor_memory_lm(config)
 
     # Count parameters
     std_params = sum(p.numel() for p in standard_model.parameters())

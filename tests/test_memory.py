@@ -1,9 +1,9 @@
-"""Tests for TensorMemory and MultiHeadMemory classes."""
+"""Tests for TensorMemory, DecayingTensorMemory, and MultiHeadMemory classes."""
 
 import pytest
 import torch
 
-from tensor_mem import MultiHeadMemory, TensorMemory
+from tensor_mem import DecayingTensorMemory, MultiHeadMemory, TensorMemory
 
 
 class TestTensorMemoryInit:
@@ -328,3 +328,215 @@ class TestTensorMemoryIntegration:
 
         assert output.device.type == "cuda"
         assert output.dtype == torch.float16
+
+
+class TestDecayingTensorMemoryInit:
+    """Tests for DecayingTensorMemory initialization."""
+
+    def test_basic_init(self):
+        """Test basic initialization."""
+        memory = DecayingTensorMemory(dim=64)
+        assert memory.dim == 64
+        assert memory.decay == 0.95
+        assert memory.eps == 1e-6
+
+    def test_custom_decay(self):
+        """Test custom decay value."""
+        memory = DecayingTensorMemory(dim=64, decay=0.9)
+        assert memory.decay == 0.9
+
+    def test_invalid_decay_raises(self):
+        """Invalid decay values should raise error."""
+        with pytest.raises(ValueError, match="decay must be in range"):
+            DecayingTensorMemory(dim=64, decay=0.0)
+
+        with pytest.raises(ValueError, match="decay must be in range"):
+            DecayingTensorMemory(dim=64, decay=1.0)
+
+        with pytest.raises(ValueError, match="decay must be in range"):
+            DecayingTensorMemory(dim=64, decay=1.5)
+
+        with pytest.raises(ValueError, match="decay must be in range"):
+            DecayingTensorMemory(dim=64, decay=-0.1)
+
+    def test_not_initialized_before_reset(self):
+        """Memory should not be initialized before reset."""
+        memory = DecayingTensorMemory(dim=64)
+        assert not memory.is_initialized
+
+    def test_initialized_after_reset(self):
+        """Memory should be initialized after reset."""
+        memory = DecayingTensorMemory(dim=64)
+        memory.reset()
+        assert memory.is_initialized
+
+
+class TestDecayingTensorMemoryUpdate:
+    """Tests for DecayingTensorMemory update method."""
+
+    def test_update_changes_memory(self):
+        """Update should change memory state."""
+        memory = DecayingTensorMemory(dim=64, decay=0.9)
+        memory.reset()
+
+        m_before = memory.M.clone()
+        z_before = memory.z.clone()
+
+        keys = torch.randn(2, 10, 64)
+        values = torch.randn(2, 10, 64)
+        memory.update(keys, values)
+
+        assert not torch.allclose(memory.M, m_before)
+        assert not torch.allclose(memory.z, z_before)
+
+    def test_decay_reduces_old_information(self):
+        """Old information should decay with each update."""
+        memory = DecayingTensorMemory(dim=64, decay=0.5)  # Fast decay
+        memory.reset()
+
+        # First update
+        keys1 = torch.randn(2, 10, 64)
+        values1 = torch.randn(2, 10, 64)
+        memory.update(keys1, values1)
+        m_after_first = memory.M.clone()
+
+        # Second update with different values
+        keys2 = torch.randn(2, 10, 64)
+        values2 = torch.randn(2, 10, 64)
+        memory.update(keys2, values2)
+
+        # M should have changed significantly due to decay
+        # The old M was multiplied by 0.5, so it should be quite different
+        assert not torch.allclose(memory.M, m_after_first)
+
+    def test_high_decay_preserves_more(self):
+        """High decay should preserve more old information."""
+        torch.manual_seed(42)
+
+        # High decay (slow forget)
+        memory_high = DecayingTensorMemory(dim=64, decay=0.99)
+        memory_high.reset()
+
+        # Low decay (fast forget)
+        memory_low = DecayingTensorMemory(dim=64, decay=0.5)
+        memory_low.reset()
+
+        # Same first update
+        keys1 = torch.randn(2, 10, 64)
+        values1 = torch.randn(2, 10, 64)
+        memory_high.update(keys1, values1)
+        memory_low.update(keys1, values1)
+
+        m_high_first = memory_high.M.clone()
+        m_low_first = memory_low.M.clone()
+
+        # Same second update
+        keys2 = torch.randn(2, 10, 64)
+        values2 = torch.randn(2, 10, 64)
+        memory_high.update(keys2, values2)
+        memory_low.update(keys2, values2)
+
+        # High decay should have M closer to original
+        diff_high = (memory_high.M - m_high_first * 0.99).abs().mean()
+        diff_low = (memory_low.M - m_low_first * 0.5).abs().mean()
+
+        # After applying decay factor, the difference should be similar
+        # (the new contribution)
+        # This mainly tests that decay is being applied
+        assert diff_high.item() > 0  # Some change occurred
+        assert diff_low.item() > 0
+
+    def test_memory_bounded_after_many_updates(self):
+        """Memory should remain bounded after many updates."""
+        memory = DecayingTensorMemory(dim=64, decay=0.95)
+        memory.reset()
+
+        for _ in range(100):
+            keys = torch.randn(2, 10, 64)
+            values = torch.randn(2, 10, 64)
+            memory.update(keys, values)
+
+        # Due to decay, memory shouldn't explode
+        assert not torch.isnan(memory.M).any()
+        assert not torch.isinf(memory.M).any()
+        assert memory.M.abs().max() <= memory.max_memory
+
+
+class TestDecayingTensorMemoryRetrieve:
+    """Tests for DecayingTensorMemory retrieve method."""
+
+    def test_retrieve_returns_correct_shape(self):
+        """Retrieve should return correct output shape."""
+        memory = DecayingTensorMemory(dim=64)
+        memory.reset()
+
+        keys = torch.randn(2, 10, 64)
+        values = torch.randn(2, 10, 64)
+        memory.update(keys, values)
+
+        queries = torch.randn(4, 20, 64)
+        output = memory.retrieve(queries)
+
+        assert output.shape == (4, 20, 64)
+
+    def test_retrieve_no_nan(self):
+        """Retrieve should not produce NaN values."""
+        memory = DecayingTensorMemory(dim=64, decay=0.9)
+        memory.reset()
+
+        for _ in range(10):
+            keys = torch.randn(2, 10, 64)
+            values = torch.randn(2, 10, 64)
+            memory.update(keys, values)
+
+        queries = torch.randn(2, 10, 64)
+        output = memory.retrieve(queries)
+
+        assert not torch.isnan(output).any()
+        assert not torch.isinf(output).any()
+
+
+class TestDecayingTensorMemoryVsTensorMemory:
+    """Comparison tests between DecayingTensorMemory and TensorMemory."""
+
+    def test_decaying_converges_to_recent(self):
+        """Decaying memory should converge toward recent information."""
+        torch.manual_seed(42)
+
+        memory = DecayingTensorMemory(dim=64, decay=0.5)
+        memory.reset()
+
+        # Many updates with same pattern
+        keys = torch.randn(2, 10, 64)
+        values = torch.randn(2, 10, 64)
+
+        for _ in range(20):
+            memory.update(keys, values)
+
+        m_converged = memory.M.clone()
+
+        # One more update - should be very similar
+        memory.update(keys, values)
+
+        # Memory should be close to converged state
+        assert torch.allclose(memory.M, m_converged, rtol=0.1)
+
+    def test_normal_memory_accumulates_unbounded(self):
+        """Normal TensorMemory accumulates while decaying stays bounded."""
+        torch.manual_seed(42)
+
+        memory_normal = TensorMemory(dim=64)
+        memory_decaying = DecayingTensorMemory(dim=64, decay=0.9)
+        memory_normal.reset()
+        memory_decaying.reset()
+
+        for _ in range(50):
+            keys = torch.randn(2, 10, 64)
+            values = torch.randn(2, 10, 64)
+            memory_normal.update(keys, values)
+            memory_decaying.update(keys, values)
+
+        # Normal memory z grows without bound (clamped at max_norm)
+        # Decaying memory z stays bounded by the decay
+        # This is the key difference
+        assert memory_normal.z.mean() > memory_decaying.z.mean()

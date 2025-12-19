@@ -1,10 +1,11 @@
 """tensor-mem: Linear Attention with Tensor Product Memory."""
 
 from .attention import LinearMemoryAttention
-from .memory import MultiHeadMemory, TensorMemory
+from .memory import DecayingTensorMemory, MultiHeadMemory, TensorMemory
 
 __all__ = [
     "TensorMemory",
+    "DecayingTensorMemory",
     "MultiHeadMemory",
     "LinearMemoryAttention",
 ]

@@ -7,7 +7,8 @@ from typing import Any
 import torch
 import torch.nn as nn
 
-from .base import BaseTensorMemory, TensorMemory
+from .base import BaseTensorMemory
+from .tensor import TensorMemory
 
 
 class MultiHeadMemory(nn.Module):

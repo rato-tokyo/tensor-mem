@@ -1,12 +1,13 @@
 """Memory module for tensor-mem."""
 
-from .base import BaseTensorMemory, TensorMemory
+from .base import BaseTensorMemory
 from .decaying import DecayingTensorMemory
 from .multi_head import MultiHeadMemory
+from .tensor import TensorMemory
 
 __all__ = [
     "BaseTensorMemory",
-    "TensorMemory",
     "DecayingTensorMemory",
     "MultiHeadMemory",
+    "TensorMemory",
 ]

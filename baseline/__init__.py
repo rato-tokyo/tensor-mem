@@ -2,21 +2,28 @@
 
 This module provides:
 - StandardTransformerLM: Traditional transformer with positional encoding (baseline)
+- StandardTransformerBlock: Single transformer block
+
+Declarative Configuration:
+    model = StandardTransformerLM(
+        vocab_size=32000,
+        max_len=512,
+        dropout=0.1,
+        layers=[
+            StandardTransformerBlock(d_model=256, num_heads=4, d_ff=1024, dropout=0.1),
+            StandardTransformerBlock(d_model=256, num_heads=4, d_ff=1024, dropout=0.1),
+        ],
+    )
 """
 
 from __future__ import annotations
 
-from baseline.config import StandardTransformerConfig
 from baseline.models import (
+    StandardTransformerBlock,
     StandardTransformerLM,
-    create_standard_transformer_lm,
 )
 
 __all__ = [
-    # Config classes
-    "StandardTransformerConfig",
-    # Model classes
+    "StandardTransformerBlock",
     "StandardTransformerLM",
-    # Factory functions
-    "create_standard_transformer_lm",
 ]

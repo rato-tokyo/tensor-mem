@@ -1,6 +1,19 @@
 """Baseline LLM models for comparison.
 
 StandardTransformerLM: Traditional transformer with positional encoding (baseline).
+
+Declarative Configuration:
+    model = StandardTransformerLM(
+        vocab_size=32000,
+        max_len=512,
+        dropout=0.1,
+        layers=[
+            StandardTransformerBlock(d_model=256, num_heads=4, d_ff=1024, dropout=0.1),
+            StandardTransformerBlock(d_model=256, num_heads=4, d_ff=1024, dropout=0.1),
+            StandardTransformerBlock(d_model=256, num_heads=4, d_ff=1024, dropout=0.1),
+            StandardTransformerBlock(d_model=256, num_heads=4, d_ff=1024, dropout=0.1),
+        ],
+    )
 """
 
 from __future__ import annotations
@@ -9,8 +22,6 @@ import math
 
 import torch
 import torch.nn as nn
-
-from .config import StandardTransformerConfig
 
 
 class SinusoidalPositionalEncoding(nn.Module):
@@ -40,6 +51,9 @@ class StandardTransformerBlock(nn.Module):
 
     def __init__(self, d_model: int, num_heads: int, d_ff: int, dropout: float) -> None:
         super().__init__()
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.d_ff = d_ff
         self.attention = nn.MultiheadAttention(
             embed_dim=d_model,
             num_heads=num_heads,
@@ -77,34 +91,47 @@ class StandardTransformerLM(nn.Module):
     This serves as the baseline for comparison with tensor memory LLM.
     Uses sinusoidal positional encoding and standard softmax attention.
 
-    Uses config-based initialization - no default arguments.
+    Declarative Configuration:
+        model = StandardTransformerLM(
+            vocab_size=32000,
+            max_len=512,
+            dropout=0.1,
+            layers=[
+                StandardTransformerBlock(d_model=256, num_heads=4, d_ff=1024, dropout=0.1),
+                StandardTransformerBlock(d_model=256, num_heads=4, d_ff=1024, dropout=0.1),
+            ],
+        )
     """
 
-    def __init__(self, config: StandardTransformerConfig) -> None:
+    def __init__(
+        self,
+        vocab_size: int,
+        max_len: int,
+        dropout: float,
+        layers: list[StandardTransformerBlock],
+    ) -> None:
         """Initialize StandardTransformerLM.
 
         Args:
-            config: StandardTransformerConfig containing all model settings.
+            vocab_size: Size of vocabulary.
+            max_len: Maximum sequence length for positional encoding.
+            dropout: Dropout rate.
+            layers: List of pre-configured StandardTransformerBlock instances.
         """
         super().__init__()
-        self.d_model = config.d_model
+        if not layers:
+            raise ValueError("layers must not be empty")
 
-        self.embedding = nn.Embedding(config.vocab_size, config.d_model)
-        self.pos_encoding = SinusoidalPositionalEncoding(
-            config.d_model, config.max_len, config.dropout
-        )
+        # Get d_model from first layer
+        self.d_model = layers[0].d_model
 
-        self.layers = nn.ModuleList(
-            [
-                StandardTransformerBlock(
-                    config.d_model, config.num_heads, config.d_ff, config.dropout
-                )
-                for _ in range(config.num_layers)
-            ]
-        )
+        self.embedding = nn.Embedding(vocab_size, self.d_model)
+        self.pos_encoding = SinusoidalPositionalEncoding(self.d_model, max_len, dropout)
 
-        self.norm = nn.LayerNorm(config.d_model)
-        self.lm_head = nn.Linear(config.d_model, config.vocab_size, bias=False)
+        self.layers = nn.ModuleList(layers)
+
+        self.norm = nn.LayerNorm(self.d_model)
+        self.lm_head = nn.Linear(self.d_model, vocab_size, bias=False)
         self.lm_head.weight = self.embedding.weight
 
     def forward(
@@ -131,15 +158,3 @@ class StandardTransformerLM(nn.Module):
         """Get hidden states without computing logits."""
         _, hidden = self.forward(input_ids, return_hidden=True)
         return hidden
-
-
-def create_standard_transformer_lm(config: StandardTransformerConfig) -> StandardTransformerLM:
-    """Factory function to create StandardTransformerLM from config.
-
-    Args:
-        config: StandardTransformerConfig containing all model settings.
-
-    Returns:
-        Configured StandardTransformerLM instance
-    """
-    return StandardTransformerLM(config)

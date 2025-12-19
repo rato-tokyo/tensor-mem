@@ -153,10 +153,58 @@ def main() -> None:
         vocab_size=args.vocab_size,
         dropout=0.1,
         layers=[
-            Layer([TensorMemory(config), TensorMemory(config), TensorMemory(config), TensorMemory(config)], hidden_size=256, d_ff=1024, dropout=0.1, bias=True, normalize_qkv=False),
-            Layer([TensorMemory(config), TensorMemory(config), TensorMemory(config), TensorMemory(config)], hidden_size=256, d_ff=1024, dropout=0.1, bias=True, normalize_qkv=False),
-            Layer([TensorMemory(config), TensorMemory(config), TensorMemory(config), TensorMemory(config)], hidden_size=256, d_ff=1024, dropout=0.1, bias=True, normalize_qkv=False),
-            Layer([TensorMemory(config), TensorMemory(config), TensorMemory(config), TensorMemory(config)], hidden_size=256, d_ff=1024, dropout=0.1, bias=True, normalize_qkv=False),
+            Layer(
+                [
+                    TensorMemory(config),
+                    TensorMemory(config),
+                    TensorMemory(config),
+                    TensorMemory(config),
+                ],
+                hidden_size=256,
+                d_ff=1024,
+                dropout=0.1,
+                bias=True,
+                normalize_qkv=False,
+            ),
+            Layer(
+                [
+                    TensorMemory(config),
+                    TensorMemory(config),
+                    TensorMemory(config),
+                    TensorMemory(config),
+                ],
+                hidden_size=256,
+                d_ff=1024,
+                dropout=0.1,
+                bias=True,
+                normalize_qkv=False,
+            ),
+            Layer(
+                [
+                    TensorMemory(config),
+                    TensorMemory(config),
+                    TensorMemory(config),
+                    TensorMemory(config),
+                ],
+                hidden_size=256,
+                d_ff=1024,
+                dropout=0.1,
+                bias=True,
+                normalize_qkv=False,
+            ),
+            Layer(
+                [
+                    TensorMemory(config),
+                    TensorMemory(config),
+                    TensorMemory(config),
+                    TensorMemory(config),
+                ],
+                hidden_size=256,
+                d_ff=1024,
+                dropout=0.1,
+                bias=True,
+                normalize_qkv=False,
+            ),
         ],
     ).to(device)
 

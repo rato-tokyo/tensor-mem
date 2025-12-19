@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import torch
 
-from baseline import StandardTransformerConfig, create_standard_transformer_lm
+from baseline import StandardTransformerBlock, StandardTransformerLM
 from benchmark.order_reversal import OrderReversalBenchmark, print_comparison
 from tensor_mem import Layer, TensorMemory, TensorMemoryLM, default_memory_config
 
@@ -43,10 +43,58 @@ def main() -> None:
         vocab_size=vocab_size,
         dropout=0.1,
         layers=[
-            Layer([TensorMemory(config), TensorMemory(config), TensorMemory(config), TensorMemory(config)], hidden_size=256, d_ff=1024, dropout=0.1, bias=True, normalize_qkv=False),
-            Layer([TensorMemory(config), TensorMemory(config), TensorMemory(config), TensorMemory(config)], hidden_size=256, d_ff=1024, dropout=0.1, bias=True, normalize_qkv=False),
-            Layer([TensorMemory(config), TensorMemory(config), TensorMemory(config), TensorMemory(config)], hidden_size=256, d_ff=1024, dropout=0.1, bias=True, normalize_qkv=False),
-            Layer([TensorMemory(config), TensorMemory(config), TensorMemory(config), TensorMemory(config)], hidden_size=256, d_ff=1024, dropout=0.1, bias=True, normalize_qkv=False),
+            Layer(
+                [
+                    TensorMemory(config),
+                    TensorMemory(config),
+                    TensorMemory(config),
+                    TensorMemory(config),
+                ],
+                hidden_size=256,
+                d_ff=1024,
+                dropout=0.1,
+                bias=True,
+                normalize_qkv=False,
+            ),
+            Layer(
+                [
+                    TensorMemory(config),
+                    TensorMemory(config),
+                    TensorMemory(config),
+                    TensorMemory(config),
+                ],
+                hidden_size=256,
+                d_ff=1024,
+                dropout=0.1,
+                bias=True,
+                normalize_qkv=False,
+            ),
+            Layer(
+                [
+                    TensorMemory(config),
+                    TensorMemory(config),
+                    TensorMemory(config),
+                    TensorMemory(config),
+                ],
+                hidden_size=256,
+                d_ff=1024,
+                dropout=0.1,
+                bias=True,
+                normalize_qkv=False,
+            ),
+            Layer(
+                [
+                    TensorMemory(config),
+                    TensorMemory(config),
+                    TensorMemory(config),
+                    TensorMemory(config),
+                ],
+                hidden_size=256,
+                d_ff=1024,
+                dropout=0.1,
+                bias=True,
+                normalize_qkv=False,
+            ),
         ],
     )
 
@@ -58,17 +106,18 @@ def main() -> None:
 
     print(f"Model config: d_model={d_model}, heads={num_heads}, layers={num_layers}")
 
-    # Create standard transformer with matching parameters
-    std_config = StandardTransformerConfig(
+    # StandardTransformerLM: 4 layers, 4 heads, d_model=256, d_ff=1024
+    standard_model = StandardTransformerLM(
         vocab_size=vocab_size,
-        d_model=d_model,
-        num_heads=num_heads,
-        num_layers=num_layers,
-        d_ff=d_ff,
         max_len=512,
         dropout=0.1,
+        layers=[
+            StandardTransformerBlock(d_model=d_model, num_heads=num_heads, d_ff=d_ff, dropout=0.1),
+            StandardTransformerBlock(d_model=d_model, num_heads=num_heads, d_ff=d_ff, dropout=0.1),
+            StandardTransformerBlock(d_model=d_model, num_heads=num_heads, d_ff=d_ff, dropout=0.1),
+            StandardTransformerBlock(d_model=d_model, num_heads=num_heads, d_ff=d_ff, dropout=0.1),
+        ],
     )
-    standard_model = create_standard_transformer_lm(std_config)
 
     # Count parameters
     std_params = sum(p.numel() for p in standard_model.parameters())

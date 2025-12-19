@@ -7,7 +7,7 @@ No CLI parameters, no factory functions, no dynamic generation.
 from __future__ import annotations
 
 from baseline import StandardTransformerBlock, StandardTransformerLM
-from tensor_mem import Layer, MemoryConfig, TensorMemory, TensorMemoryLM
+from tensor_mem import MemoryConfig, TensorMemoryLayer, TensorMemoryLM
 
 # =============================================================================
 # Experiment Configuration
@@ -50,54 +50,10 @@ MEMORY_CONFIG = MemoryConfig(
 TENSOR_MEMORY_MODEL = TensorMemoryLM(
     vocab_size=VOCAB_SIZE,
     layers=[
-        Layer(
-            [
-                TensorMemory(MEMORY_CONFIG),
-                TensorMemory(MEMORY_CONFIG),
-                TensorMemory(MEMORY_CONFIG),
-                TensorMemory(MEMORY_CONFIG),
-            ],
-            hidden_size=D_MODEL,
-            d_ff=D_FF,
-            bias=True,
-            normalize_qkv=False,
-        ),
-        Layer(
-            [
-                TensorMemory(MEMORY_CONFIG),
-                TensorMemory(MEMORY_CONFIG),
-                TensorMemory(MEMORY_CONFIG),
-                TensorMemory(MEMORY_CONFIG),
-            ],
-            hidden_size=D_MODEL,
-            d_ff=D_FF,
-            bias=True,
-            normalize_qkv=False,
-        ),
-        Layer(
-            [
-                TensorMemory(MEMORY_CONFIG),
-                TensorMemory(MEMORY_CONFIG),
-                TensorMemory(MEMORY_CONFIG),
-                TensorMemory(MEMORY_CONFIG),
-            ],
-            hidden_size=D_MODEL,
-            d_ff=D_FF,
-            bias=True,
-            normalize_qkv=False,
-        ),
-        Layer(
-            [
-                TensorMemory(MEMORY_CONFIG),
-                TensorMemory(MEMORY_CONFIG),
-                TensorMemory(MEMORY_CONFIG),
-                TensorMemory(MEMORY_CONFIG),
-            ],
-            hidden_size=D_MODEL,
-            d_ff=D_FF,
-            bias=True,
-            normalize_qkv=False,
-        ),
+        TensorMemoryLayer(hidden_size=D_MODEL, d_ff=D_FF, memory_config=MEMORY_CONFIG),
+        TensorMemoryLayer(hidden_size=D_MODEL, d_ff=D_FF, memory_config=MEMORY_CONFIG),
+        TensorMemoryLayer(hidden_size=D_MODEL, d_ff=D_FF, memory_config=MEMORY_CONFIG),
+        TensorMemoryLayer(hidden_size=D_MODEL, d_ff=D_FF, memory_config=MEMORY_CONFIG),
     ],
 )
 

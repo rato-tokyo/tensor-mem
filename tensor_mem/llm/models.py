@@ -6,8 +6,8 @@ Declarative Configuration:
     model = TensorMemoryLM(
         vocab_size=32000,
         layers=[
-            Layer([TensorMemory(config), TensorMemory(config), ...]),
-            Layer([TensorMemory(config), TensorMemory(config), ...]),
+            TensorMemoryLayer(hidden_size=256, d_ff=1024, memory_config=config),
+            TensorMemoryLayer(hidden_size=256, d_ff=1024, memory_config=config),
         ],
     )
 """
@@ -15,11 +15,13 @@ Declarative Configuration:
 from __future__ import annotations
 
 import math
+from typing import TYPE_CHECKING
 
 import torch
 import torch.nn as nn
 
-from .layer import Layer
+if TYPE_CHECKING:
+    from tensor_mem.layer import TensorMemoryLayer
 
 
 class TensorMemoryLM(nn.Module):
@@ -28,17 +30,17 @@ class TensorMemoryLM(nn.Module):
     Declarative Configuration: structure is visible at construction site.
 
     Example:
-        >>> config = default_memory_config(dim=64)
+        >>> config = MemoryConfig(dim=64, eps=1e-6, use_delta_rule=False)
         >>> model = TensorMemoryLM(
         ...     vocab_size=32000,
         ...     layers=[
-        ...         Layer([TensorMemory(config), TensorMemory(config)], hidden_size=128, ...),
-        ...         Layer([TensorMemory(config), TensorMemory(config)], hidden_size=128, ...),
+        ...         TensorMemoryLayer(hidden_size=256, d_ff=1024, memory_config=config),
+        ...         TensorMemoryLayer(hidden_size=256, d_ff=1024, memory_config=config),
         ...     ],
         ... )
     """
 
-    def __init__(self, vocab_size: int, layers: list[Layer]) -> None:
+    def __init__(self, vocab_size: int, layers: list[TensorMemoryLayer]) -> None:
         super().__init__()
 
         if not layers:

@@ -3,15 +3,15 @@
 This package provides:
 - Memory: TensorMemory, DecayingTensorMemory, MultiHeadMemory
 - Attention: LinearMemoryAttention
-- Layer: FeedForwardLayer, PreNormBlock
-- LLM: TensorMemoryLM, Layer
+- Layer: TensorMemoryLayer, FeedForwardLayer, PreNormBlock
+- LLM: TensorMemoryLM
 
 Declarative Configuration:
     model = TensorMemoryLM(
         vocab_size=32000,
         layers=[
-            Layer([TensorMemory(config), ...], hidden_size=256, ...),
-            Layer([TensorMemory(config), ...], hidden_size=256, ...),
+            TensorMemoryLayer(hidden_size=256, d_ff=1024, memory_config=config),
+            TensorMemoryLayer(hidden_size=256, d_ff=1024, memory_config=config),
         ],
     )
 """
@@ -20,11 +20,9 @@ from .attention import LinearMemoryAttention
 from .layer import (
     FeedForwardLayer,
     PreNormBlock,
+    TensorMemoryLayer,
 )
-from .llm import (
-    Layer,
-    TensorMemoryLM,
-)
+from .llm import TensorMemoryLM
 from .memory import (
     BaseTensorMemory,
     DecayingMemoryConfig,
@@ -46,10 +44,10 @@ __all__ = [
     # Attention
     "LinearMemoryAttention",
     # Layer components
+    "TensorMemoryLayer",
     "FeedForwardLayer",
     "PreNormBlock",
     # LLM classes (Declarative Configuration)
-    "Layer",
     "TensorMemoryLM",
 ]
 

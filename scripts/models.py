@@ -6,8 +6,6 @@ No CLI parameters, no factory functions, no dynamic generation.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from baseline import StandardTransformerBlock, StandardTransformerLM
 from tensor_mem import Layer, MemoryConfig, TensorMemory, TensorMemoryLM
 
@@ -16,43 +14,22 @@ from tensor_mem import Layer, MemoryConfig, TensorMemory, TensorMemoryLM
 # Experiment Configuration
 # =============================================================================
 
+DEVICE = "cuda"
+D_MODEL = 256
+NUM_HEADS = 4
+NUM_LAYERS = 4
+D_FF = 1024
+VOCAB_SIZE = 10000
+HEAD_DIM = D_MODEL // NUM_HEADS
 
-@dataclass(frozen=True)
-class ExperimentConfig:
-    """Configuration for WikiText-2 comparison experiment.
+MAX_EPOCHS = 50
+PATIENCE = 2
+SEQ_LEN = 64
+BATCH_SIZE = 32
+LR = 1e-3
+CLIP = 0.5
 
-    All settings are defined here. No CLI parameters.
-    Edit this dataclass to change experiment settings.
-    """
-
-    # Device
-    device: str = "cuda"
-
-    # Model architecture
-    d_model: int = 256
-    num_heads: int = 4
-    num_layers: int = 4
-    d_ff: int = 1024
-    vocab_size: int = 10000
-
-    # Training
-    max_epochs: int = 50
-    patience: int = 2
-    seq_len: int = 64
-    batch_size: int = 32
-    lr: float = 1e-3
-    clip: float = 0.5
-
-    # Data
-    data_fraction: float = 1.0
-
-    @property
-    def head_dim(self) -> int:
-        """Compute head dimension from model dimension and number of heads."""
-        return self.d_model // self.num_heads
-
-
-EXPERIMENT_CONFIG = ExperimentConfig()
+DATA_FRACTION = 1.0
 
 
 # =============================================================================
@@ -60,7 +37,7 @@ EXPERIMENT_CONFIG = ExperimentConfig()
 # =============================================================================
 
 MEMORY_CONFIG = MemoryConfig(
-    dim=EXPERIMENT_CONFIG.head_dim,
+    dim=HEAD_DIM,
     eps=1e-6,
     use_delta_rule=False,
     max_delta=10.0,
@@ -73,64 +50,49 @@ MEMORY_CONFIG = MemoryConfig(
 # Model Definitions - Declarative Configuration
 # =============================================================================
 
-# Note: vocab_size is set later based on actual vocabulary
-# These are template functions that create models with explicit structure
+# TensorMemoryLM: 4 layers, 4 heads each
+TENSOR_MEMORY_MODEL = TensorMemoryLM(
+    vocab_size=VOCAB_SIZE,
+    layers=[
+        Layer(
+            [TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG)],
+            hidden_size=D_MODEL,
+            d_ff=D_FF,
+            bias=True,
+            normalize_qkv=False,
+        ),
+        Layer(
+            [TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG)],
+            hidden_size=D_MODEL,
+            d_ff=D_FF,
+            bias=True,
+            normalize_qkv=False,
+        ),
+        Layer(
+            [TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG)],
+            hidden_size=D_MODEL,
+            d_ff=D_FF,
+            bias=True,
+            normalize_qkv=False,
+        ),
+        Layer(
+            [TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG)],
+            hidden_size=D_MODEL,
+            d_ff=D_FF,
+            bias=True,
+            normalize_qkv=False,
+        ),
+    ],
+)
 
-
-def create_tensor_memory_model(vocab_size: int) -> TensorMemoryLM:
-    """Create TensorMemoryLM.
-
-    Declarative Configuration: 4 layers, 4 heads each - structure is visible.
-    """
-    cfg = EXPERIMENT_CONFIG
-    return TensorMemoryLM(
-        vocab_size=vocab_size,
-        layers=[
-            Layer(
-                [TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG)],
-                hidden_size=cfg.d_model,
-                d_ff=cfg.d_ff,
-                bias=True,
-                normalize_qkv=False,
-            ),
-            Layer(
-                [TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG)],
-                hidden_size=cfg.d_model,
-                d_ff=cfg.d_ff,
-                bias=True,
-                normalize_qkv=False,
-            ),
-            Layer(
-                [TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG)],
-                hidden_size=cfg.d_model,
-                d_ff=cfg.d_ff,
-                bias=True,
-                normalize_qkv=False,
-            ),
-            Layer(
-                [TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG), TensorMemory(MEMORY_CONFIG)],
-                hidden_size=cfg.d_model,
-                d_ff=cfg.d_ff,
-                bias=True,
-                normalize_qkv=False,
-            ),
-        ],
-    )
-
-
-def create_standard_transformer_model(vocab_size: int) -> StandardTransformerLM:
-    """Create StandardTransformerLM.
-
-    Declarative Configuration: 4 layers - structure is visible.
-    """
-    cfg = EXPERIMENT_CONFIG
-    return StandardTransformerLM(
-        vocab_size=vocab_size,
-        max_len=cfg.seq_len,
-        layers=[
-            StandardTransformerBlock(d_model=cfg.d_model, num_heads=cfg.num_heads, d_ff=cfg.d_ff),
-            StandardTransformerBlock(d_model=cfg.d_model, num_heads=cfg.num_heads, d_ff=cfg.d_ff),
-            StandardTransformerBlock(d_model=cfg.d_model, num_heads=cfg.num_heads, d_ff=cfg.d_ff),
-            StandardTransformerBlock(d_model=cfg.d_model, num_heads=cfg.num_heads, d_ff=cfg.d_ff),
-        ],
-    )
+# StandardTransformerLM: 4 layers
+STANDARD_TRANSFORMER_MODEL = StandardTransformerLM(
+    vocab_size=VOCAB_SIZE,
+    max_len=SEQ_LEN,
+    layers=[
+        StandardTransformerBlock(d_model=D_MODEL, num_heads=NUM_HEADS, d_ff=D_FF),
+        StandardTransformerBlock(d_model=D_MODEL, num_heads=NUM_HEADS, d_ff=D_FF),
+        StandardTransformerBlock(d_model=D_MODEL, num_heads=NUM_HEADS, d_ff=D_FF),
+        StandardTransformerBlock(d_model=D_MODEL, num_heads=NUM_HEADS, d_ff=D_FF),
+    ],
+)
